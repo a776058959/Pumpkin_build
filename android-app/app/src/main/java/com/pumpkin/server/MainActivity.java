@@ -709,19 +709,20 @@ public class MainActivity extends Activity {
             return;
         }
         float tabWidth = navRow.getWidth() / 3f;
-        int inset = UiKit.dp(this, 6);
-        int insetY = UiKit.dp(this, 7);
-        int targetWidth = (int) (tabWidth - inset * 2);
-        View parent = (View) navIndicator.getParent();
-        int targetHeight = Math.max(0, parent.getHeight() - insetY * 2);
+        // 小胶囊，只罩住图标那一行（SukiSU / Material 3 就是这个做法），
+        // 而不是铺满整个 tab —— 铺满会变成一块大方块。
+        int pillW = Math.max(UiKit.dp(this, 44),
+                Math.min((int) (tabWidth * 0.70f), UiKit.dp(this, 72)));
+        int pillH = UiKit.dp(this, 34);
+        int topMargin = UiKit.dp(this, 6);
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) navIndicator.getLayoutParams();
-        if (lp.width != targetWidth || lp.height != targetHeight) {
-            lp.width = targetWidth;
-            lp.height = targetHeight;
-            lp.topMargin = insetY;
+        if (lp.width != pillW || lp.height != pillH) {
+            lp.width = pillW;
+            lp.height = pillH;
+            lp.topMargin = topMargin;
             navIndicator.setLayoutParams(lp);
         }
-        float targetX = index * tabWidth + inset;
+        float targetX = index * tabWidth + (tabWidth - pillW) / 2f;
         navIndicator.animate().cancel();
         if (animate) {
             navIndicator.animate()
