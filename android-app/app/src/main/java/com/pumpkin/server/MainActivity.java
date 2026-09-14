@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
-import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -24,6 +23,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -34,35 +34,50 @@ import java.io.File;
 import java.util.List;
 
 /**
- * 轻壳主界面：不内置服务端，联网从 Releases 下载/切换/回滚/清理版本。
- * 视觉风格：深色渐变 + 柔光玻璃卡片。
+ * 轻壳主界面：底部悬浮玻璃导航栏 + 三个页面（运行 / 更新 / 设置）。
+ * 壳本身不含服务端，联网从 Releases 下载、切换、回滚、清理版本。
  */
 public class MainActivity extends Activity {
 
     private static final int REQ_NOTIFICATIONS = 1;
+    private static final int PAGE_RUN = 0;
+    private static final int PAGE_UPDATE = 1;
+    private static final int PAGE_SETTINGS = 2;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     private VersionManager versions;
     private UpdateClient updates;
 
+    // 页面容器与导航
+    private View pageRun;
+    private View pageUpdate;
+    private View pageSettings;
+    private final TextView[] tabIcons = new TextView[3];
+    private final TextView[] tabLabels = new TextView[3];
+
+    // 运行页
     private TextView statusDot;
     private TextView statusText;
     private TextView addrText;
     private TextView dirText;
+    private TextView logView;
+    private ScrollView logScroll;
+    private EditText cmdInput;
 
+    // 更新页
     private TextView versionCurrent;
     private TextView versionInstalled;
     private TextView versionHint;
     private ProgressBar progress;
-
     private Button installBtn;
     private Button checkBtn;
-    private Button modeBtn;
 
-    private TextView logView;
-    private ScrollView logScroll;
-    private EditText cmdInput;
+    // 设置页
+    private TextView modeValue;
+    private EditText apiInput;
+    private EditText repoInput;
+    private EditText mirrorInput;
 
     private UpdateClient.Release latest;
     private volatile boolean busy;
@@ -82,6 +97,7 @@ public class MainActivity extends Activity {
         versions = new VersionManager(this);
         updates = new UpdateClient(this);
         setContentView(buildUi());
+        switchPage(PAGE_RUN);
         requestNotificationPermissionIfNeeded();
         ui.post(ticker);
     }
@@ -105,36 +121,69 @@ public class MainActivity extends Activity {
         cancelRequested = true;
     }
 
-    // ---------------------------------------------------------------- UI
+    // ================================================================ 整体布局
 
     private View buildUi() {
-        ScrollView root = new ScrollView(this);
+        FrameLayout root = new FrameLayout(this);
         root.setBackground(UiKit.windowBackground());
-        root.setFillViewport(true);
 
+        FrameLayout content = new FrameLayout(this);
+        content.setPadding(0, 0, 0, UiKit.dp(this, 96));
+        root.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        pageRun = buildRunPage();
+        pageUpdate = buildUpdatePage();
+        pageSettings = buildSettingsPage();
+        content.addView(pageRun);
+        content.addView(pageUpdate);
+        content.addView(pageSettings);
+
+        FrameLayout.LayoutParams navParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM);
+        navParams.setMargins(UiKit.dp(this, 18), 0, UiKit.dp(this, 18), UiKit.dp(this, 18));
+        root.addView(buildBottomNav(), navParams);
+
+        return root;
+    }
+
+    private ScrollView pageContainer() {
+        ScrollView sv = new ScrollView(this);
+        sv.setFillViewport(true);
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         int pad = UiKit.dp(this, 16);
-        col.setPadding(pad, UiKit.dp(this, 26), pad, UiKit.dp(this, 26));
-        root.addView(col, new ScrollView.LayoutParams(
+        col.setPadding(pad, UiKit.dp(this, 26), pad, UiKit.dp(this, 18));
+        sv.addView(col, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        sv.setTag(col);
+        return sv;
+    }
 
-        col.addView(UiKit.header(this, "Pumpkin", "Rust 版 Minecraft 服务端 · 在线版本管理"));
+    private static LinearLayout columnOf(ScrollView sv) {
+        return (LinearLayout) sv.getTag();
+    }
 
-        // ---------- 运行状态 ----------
+    // ---------------------------------------------------------------- 运行页
+
+    private View buildRunPage() {
+        ScrollView sv = pageContainer();
+        LinearLayout col = columnOf(sv);
+
+        col.addView(UiKit.header(this, "Pumpkin", "Rust 版 Minecraft 服务端"));
+
         LinearLayout statusCard = UiKit.card(this);
         statusDot = new TextView(this);
         statusText = new TextView(this);
         statusCard.addView(UiKit.statusRow(this, statusDot, statusText));
 
-        addrText = UiKit.label(this, "");
+        addrText = UiKit.value(this, "");
+        addrText.setTextSize(15);
         LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ap.topMargin = UiKit.dp(this, 10);
+        ap.topMargin = UiKit.dp(this, 12);
         addrText.setLayoutParams(ap);
-        addrText.setTextColor(UiKit.TEXT);
-        addrText.setTextSize(14);
-        addrText.setTypeface(Typeface.MONOSPACE);
         statusCard.addView(addrText);
 
         dirText = UiKit.label(this, "");
@@ -147,17 +196,70 @@ public class MainActivity extends Activity {
         Button battBtn = UiKit.button(this, "电池优化", false);
         Button copyBtn = UiKit.button(this, "复制地址", false);
         statusCard.addView(UiKit.buttonRow(this, battBtn, copyBtn));
-
-        modeBtn = UiKit.button(this, "启动方式：普通", false);
-        statusCard.addView(UiKit.buttonRow(this, modeBtn));
         col.addView(statusCard);
 
-        // ---------- 版本管理 ----------
+        LinearLayout consoleCard = UiKit.card(this);
+        consoleCard.addView(UiKit.cardTitle(this, "控制台"));
+
+        logScroll = new ScrollView(this);
+        logView = new TextView(this);
+        logView.setTextSize(10.5f);
+        logView.setTypeface(Typeface.MONOSPACE);
+        logView.setTextColor(0xFFCFD6E4);
+        logView.setTextIsSelectable(true);
+        logScroll.addView(logView);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, UiKit.dp(this, 260));
+        lp.topMargin = UiKit.dp(this, 10);
+        logScroll.setLayoutParams(lp);
+        logScroll.setBackground(UiKit.glass(this, false));
+        logScroll.setPadding(UiKit.dp(this, 10), UiKit.dp(this, 10),
+                UiKit.dp(this, 10), UiKit.dp(this, 10));
+        consoleCard.addView(logScroll);
+
+        LinearLayout cmdRow = new LinearLayout(this);
+        cmdRow.setOrientation(LinearLayout.HORIZONTAL);
+        cmdRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cp.topMargin = UiKit.dp(this, 12);
+        cmdRow.setLayoutParams(cp);
+
+        cmdInput = new EditText(this);
+        cmdInput.setHint("命令：list / op 玩家名 / stop");
+        styleInput(cmdInput);
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        ip.rightMargin = UiKit.dp(this, 8);
+        cmdRow.addView(cmdInput, ip);
+
+        Button sendBtn = UiKit.button(this, "发送", true);
+        cmdRow.addView(sendBtn);
+        consoleCard.addView(cmdRow);
+        col.addView(consoleCard);
+
+        startBtn.setOnClickListener(v -> startServer());
+        stopBtn.setOnClickListener(v -> stopServer());
+        battBtn.setOnClickListener(v -> openBatterySettings());
+        copyBtn.setOnClickListener(v -> copyAddress());
+        sendBtn.setOnClickListener(v -> sendCommand());
+
+        return sv;
+    }
+
+    // ---------------------------------------------------------------- 更新页
+
+    private View buildUpdatePage() {
+        ScrollView sv = pageContainer();
+        LinearLayout col = columnOf(sv);
+
+        col.addView(UiKit.header(this, "服务端版本", "从 Releases 下载 / 切换 / 回滚"));
+
         LinearLayout verCard = UiKit.card(this);
-        verCard.addView(UiKit.cardTitle(this, "服务端版本"));
+        verCard.addView(UiKit.cardTitle(this, "当前版本"));
 
         versionCurrent = UiKit.value(this, "");
-        versionCurrent.setTextSize(15);
+        versionCurrent.setTextSize(16);
         versionCurrent.setTypeface(Typeface.DEFAULT_BOLD);
         LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -183,82 +285,240 @@ public class MainActivity extends Activity {
         verCard.addView(versionHint);
 
         checkBtn = UiKit.button(this, "检查更新", false);
-        checkBtn.setOnLongClickListener(v -> {
-            showSettingsDialog();
-            return true;
-        });
         installBtn = UiKit.button(this, "下载最新版本", true);
         verCard.addView(UiKit.buttonRow(this, checkBtn, installBtn));
 
-        Button switchBtn = UiKit.button(this, "切换版本", false);
-        Button cleanBtn = UiKit.button(this, "清理数据", false);
-        verCard.addView(UiKit.buttonRow(this, switchBtn, cleanBtn));
+        Button switchBtn = UiKit.button(this, "切换 / 回滚", false);
+        Button deleteBtn = UiKit.button(this, "删除版本", false);
+        verCard.addView(UiKit.buttonRow(this, switchBtn, deleteBtn));
         col.addView(verCard);
 
-        // ---------- 控制台 ----------
-        LinearLayout consoleCard = UiKit.card(this);
-        consoleCard.addView(UiKit.cardTitle(this, "控制台"));
+        LinearLayout tipsCard = UiKit.card(this);
+        tipsCard.addView(UiKit.cardTitle(this, "说明"));
+        tipsCard.addView(UiKit.label(this,
+                "· 服务端程序保存在应用内部私有目录（那里才允许执行）\n"
+                        + "· 游戏数据在外部目录，插 USB 或文件管理器即可修改\n"
+                        + "· 最多保留 3 个历史版本用于回滚\n"
+                        + "· 更新会替换程序文件，需先停止服务器\n"
+                        + "· 下载源不通时到「设置」页改镜像"));
+        col.addView(tipsCard);
 
-        logScroll = new ScrollView(this);
-        logView = new TextView(this);
-        logView.setTextSize(10.5f);
-        logView.setTypeface(Typeface.MONOSPACE);
-        logView.setTextColor(0xFFCFD6E4);
-        logView.setTextIsSelectable(true);
-        logScroll.addView(logView);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, UiKit.dp(this, 240));
-        lp.topMargin = UiKit.dp(this, 10);
-        logScroll.setLayoutParams(lp);
-        logScroll.setBackground(UiKit.glass(this, false));
-        logScroll.setPadding(UiKit.dp(this, 10), UiKit.dp(this, 10),
-                UiKit.dp(this, 10), UiKit.dp(this, 10));
-        consoleCard.addView(logScroll);
-
-        LinearLayout cmdRow = new LinearLayout(this);
-        cmdRow.setOrientation(LinearLayout.HORIZONTAL);
-        cmdRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cp.topMargin = UiKit.dp(this, 12);
-        cmdRow.setLayoutParams(cp);
-
-        cmdInput = new EditText(this);
-        cmdInput.setHint("控制台命令：list / op 玩家名 / stop");
-        cmdInput.setHintTextColor(UiKit.TEXT_DIM);
-        cmdInput.setTextColor(UiKit.TEXT);
-        cmdInput.setTextSize(14);
-        cmdInput.setSingleLine(true);
-        cmdInput.setInputType(InputType.TYPE_CLASS_TEXT);
-        cmdInput.setBackground(UiKit.glass(this, false));
-        cmdInput.setPadding(UiKit.dp(this, 14), UiKit.dp(this, 10),
-                UiKit.dp(this, 14), UiKit.dp(this, 10));
-        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        ip.rightMargin = UiKit.dp(this, 8);
-        cmdRow.addView(cmdInput, ip);
-
-        Button sendBtn = UiKit.button(this, "发送", true);
-        cmdRow.addView(sendBtn);
-        consoleCard.addView(cmdRow);
-        col.addView(consoleCard);
-
-        // ---------- 事件 ----------
-        startBtn.setOnClickListener(v -> startServer());
-        stopBtn.setOnClickListener(v -> stopServer());
-        battBtn.setOnClickListener(v -> openBatterySettings());
-        copyBtn.setOnClickListener(v -> copyAddress());
-        modeBtn.setOnClickListener(v -> showModeDialog());
         checkBtn.setOnClickListener(v -> doCheck());
         installBtn.setOnClickListener(v -> doInstallOrStop());
         switchBtn.setOnClickListener(v -> showSwitchDialog());
-        cleanBtn.setOnClickListener(v -> showCleanDialog());
-        sendBtn.setOnClickListener(v -> sendCommand());
+        deleteBtn.setOnClickListener(v -> showDeleteDialog(versions.listInstalled()));
 
-        return root;
+        return sv;
     }
 
-    // ---------------------------------------------------------------- 状态刷新
+    // ---------------------------------------------------------------- 设置页
+
+    private View buildSettingsPage() {
+        ScrollView sv = pageContainer();
+        LinearLayout col = columnOf(sv);
+
+        col.addView(UiKit.header(this, "设置", "启动方式 / 下载源 / 数据清理"));
+
+        // 启动方式
+        LinearLayout modeCard = UiKit.card(this);
+        modeCard.addView(UiKit.cardTitle(this, "服务端启动方式"));
+        modeValue = UiKit.value(this, "");
+        modeCard.addView(modeValue);
+        modeCard.addView(UiKit.label(this,
+                "普通模式：App 直接启动，依赖 targetSdk 28 的 SELinux 域豁免。\n"
+                        + "Root 模式：通过 su 启动（进程落在 magisk/su 域），不改动 SELinux，"
+                        + "不会被检测软件发现；普通模式若报 Permission denied 就用它。"));
+        Button modeBtn = UiKit.button(this, "切换启动方式", false);
+        modeCard.addView(UiKit.buttonRow(this, modeBtn));
+        col.addView(modeCard);
+
+        // 下载源
+        LinearLayout srcCard = UiKit.card(this);
+        srcCard.addView(UiKit.cardTitle(this, "下载源"));
+        srcCard.addView(UiKit.label(this,
+                "手机直连 GitHub 不通时改这里。API 地址需返回与 GitHub 相同的 JSON；"
+                        + "镜像前缀会拼在 https://github.com/... 前面（例如 https://ghfast.top/）。"));
+
+        apiInput = new EditText(this);
+        apiInput.setHint("API 地址，如 https://api.github.com");
+        apiInput.setText(UpdateClient.apiBase(this));
+        styleInput(apiInput);
+        srcCard.addView(apiInput);
+
+        repoInput = new EditText(this);
+        repoInput.setHint("仓库，如 owner/repo");
+        repoInput.setText(UpdateClient.repo(this));
+        styleInput(repoInput);
+        srcCard.addView(repoInput);
+
+        mirrorInput = new EditText(this);
+        mirrorInput.setHint("下载镜像前缀（可留空）");
+        mirrorInput.setText(Prefs.get(this, "download_mirror", ""));
+        styleInput(mirrorInput);
+        srcCard.addView(mirrorInput);
+
+        Button saveSrcBtn = UiKit.button(this, "保存下载源", true);
+        srcCard.addView(UiKit.buttonRow(this, saveSrcBtn));
+        col.addView(srcCard);
+
+        // 清理
+        LinearLayout cleanCard = UiKit.card(this);
+        cleanCard.addView(UiKit.cardTitle(this, "清理数据"));
+        cleanCard.addView(UiKit.label(this,
+                "可以分开清理：只清服务端程序、只清游戏数据（世界/配置/日志），或者全部清空。"));
+        Button cleanVerBtn = UiKit.button(this, "清服务端版本", false);
+        Button cleanDataBtn = UiKit.button(this, "清游戏数据", false);
+        cleanCard.addView(UiKit.buttonRow(this, cleanVerBtn, cleanDataBtn));
+        Button cleanAllBtn = UiKit.button(this, "全部清空", false);
+        cleanCard.addView(UiKit.buttonRow(this, cleanAllBtn));
+        col.addView(cleanCard);
+
+        // 关于
+        LinearLayout aboutCard = UiKit.card(this);
+        aboutCard.addView(UiKit.cardTitle(this, "关于"));
+        aboutCard.addView(UiKit.value(this,
+                "壳版本 " + versionName() + "（不含服务端）\n"
+                        + "服务端机器 " + UpdateClient.repo(this)));
+        Button battBtn2 = UiKit.button(this, "电池优化设置", false);
+        Button dirBtn = UiKit.button(this, "数据目录路径", false);
+        aboutCard.addView(UiKit.buttonRow(this, battBtn2, dirBtn));
+        col.addView(aboutCard);
+
+        modeBtn.setOnClickListener(v -> showModeDialog());
+        saveSrcBtn.setOnClickListener(v -> saveSource());
+        cleanVerBtn.setOnClickListener(v -> confirm("确定删除所有已下载的服务端版本吗？游戏数据会保留。", new Runnable() {
+            @Override
+            public void run() {
+                if (PumpkinServer.get().isRunning()) {
+                    toast("请先停止服务端");
+                    return;
+                }
+                versions.clearAllVersions();
+                latest = null;
+                toast("已清理服务端版本");
+                refresh();
+            }
+        }));
+        cleanDataBtn.setOnClickListener(v -> confirm("确定删除世界存档、配置和日志吗？此操作不可恢复。", new Runnable() {
+            @Override
+            public void run() {
+                if (PumpkinServer.get().isRunning()) {
+                    toast("请先停止服务端");
+                    return;
+                }
+                VersionManager.clearServerData(MainActivity.this);
+                toast("已清理游戏数据");
+                refresh();
+            }
+        }));
+        cleanAllBtn.setOnClickListener(v -> confirm("确定清空全部数据吗？包括所有服务端版本和世界存档，不可恢复。", new Runnable() {
+            @Override
+            public void run() {
+                if (PumpkinServer.get().isRunning()) {
+                    toast("请先停止服务端");
+                    return;
+                }
+                versions.clearAllVersions();
+                VersionManager.clearServerData(MainActivity.this);
+                latest = null;
+                toast("已全部清空");
+                refresh();
+            }
+        }));
+        battBtn2.setOnClickListener(v -> openBatterySettings());
+        dirBtn.setOnClickListener(v -> copyWorkDir());
+
+        return sv;
+    }
+
+    private void styleInput(EditText et) {
+        et.setHintTextColor(UiKit.TEXT_DIM);
+        et.setTextColor(UiKit.TEXT);
+        et.setTextSize(13.5f);
+        et.setSingleLine(true);
+        et.setInputType(InputType.TYPE_CLASS_TEXT);
+        et.setBackground(UiKit.glass(this, false));
+        et.setPadding(UiKit.dp(this, 14), UiKit.dp(this, 10),
+                UiKit.dp(this, 14), UiKit.dp(this, 10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = UiKit.dp(this, 10);
+        et.setLayoutParams(lp);
+    }
+
+    private String versionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    // ---------------------------------------------------------------- 底部导航
+
+    private View buildBottomNav() {
+        LinearLayout nav = new LinearLayout(this);
+        nav.setOrientation(LinearLayout.HORIZONTAL);
+        nav.setBackground(UiKit.glass(this, true));
+        nav.setElevation(UiKit.dp(this, 10));
+        int pv = UiKit.dp(this, 10);
+        nav.setPadding(UiKit.dp(this, 6), pv, UiKit.dp(this, 6), pv);
+
+        String[] icons = new String[]{"▶", "⤓", "⚙"};
+        String[] labels = new String[]{"运行", "更新", "设置"};
+        for (int i = 0; i < 3; i++) {
+            final int index = i;
+            LinearLayout tab = new LinearLayout(this);
+            tab.setOrientation(LinearLayout.VERTICAL);
+            tab.setGravity(Gravity.CENTER);
+            tab.setPadding(0, UiKit.dp(this, 6), 0, UiKit.dp(this, 6));
+
+            TextView icon = new TextView(this);
+            icon.setText(icons[i]);
+            icon.setTextSize(18);
+            icon.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            icon.setLayoutParams(ilp);
+            tab.addView(icon);
+
+            TextView label = new TextView(this);
+            label.setText(labels[i]);
+            label.setTextSize(11.5f);
+            label.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            tlp.topMargin = UiKit.dp(this, 3);
+            label.setLayoutParams(tlp);
+            tab.addView(label);
+
+            tabIcons[i] = icon;
+            tabLabels[i] = label;
+
+            tab.setOnClickListener(v -> switchPage(index));
+            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            nav.addView(tab, tp);
+        }
+        return nav;
+    }
+
+    private void switchPage(int index) {
+        pageRun.setVisibility(index == PAGE_RUN ? View.VISIBLE : View.GONE);
+        pageUpdate.setVisibility(index == PAGE_UPDATE ? View.VISIBLE : View.GONE);
+        pageSettings.setVisibility(index == PAGE_SETTINGS ? View.VISIBLE : View.GONE);
+        for (int i = 0; i < 3; i++) {
+            boolean active = (i == index);
+            tabIcons[i].setTextColor(active ? UiKit.ACCENT : UiKit.TEXT_DIM);
+            tabLabels[i].setTextColor(active ? UiKit.ACCENT : UiKit.TEXT_DIM);
+            tabLabels[i].setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        }
+        if (index == PAGE_RUN) {
+            refresh();
+        }
+    }
+
+    // ================================================================ 状态刷新
 
     private void refresh() {
         PumpkinServer server = PumpkinServer.get();
@@ -280,30 +540,31 @@ public class MainActivity extends Activity {
                 ? "未检测到局域网 IP（确认已连上 WiFi）"
                 : "Java " + lan + ":25565　·　基岩 " + lan + ":19132");
         dirText.setText("数据目录 " + ServerPaths.workDir(this).getAbsolutePath());
-        modeBtn.setText(Prefs.getBool(this, "root_mode", false)
-                ? "启动方式：Root（su，不改 SELinux）"
-                : "启动方式：普通（targetSdk 28 豁免）");
 
-        // 版本信息
+        boolean rootMode = Prefs.getBool(this, "root_mode", false);
+        if (modeValue != null) {
+            modeValue.setText(rootMode ? "Root 模式（su，不改 SELinux）" : "普通模式（targetSdk 28 豁免）");
+        }
+
         String cur = versions.currentTag();
         List<VersionManager.Installed> installed = versions.listInstalled();
         if (cur == null) {
             versionCurrent.setText("尚未安装服务端");
             installBtn.setText("下载最新版本");
         } else {
-            versionCurrent.setText("当前版本  " + cur);
-            installBtn.setText(latest != null && !latest.tag.equals(cur) ? "更新到 " + latest.tag : "重新下载当前版本");
+            versionCurrent.setText(cur);
+            installBtn.setText(latest != null && !latest.tag.equals(cur)
+                    ? "更新到 " + latest.tag : "重新下载当前版本");
         }
         StringBuilder sb = new StringBuilder();
         sb.append("已安装 ").append(installed.size()).append(" 个版本");
         if (installed.size() > 1) {
-            sb.append("（可回滚到旧版本）");
+            sb.append("（可回滚）");
         }
         sb.append("　占用 ").append(fmtSize(VersionManager.dirSize(versions.getVersionsDir())));
         sb.append("\n游戏数据 ").append(fmtSize(VersionManager.dirSize(ServerPaths.workDir(this))));
         versionInstalled.setText(sb.toString());
 
-        // 日志
         String text = server.tailLog();
         if (!text.contentEquals(logView.getText())) {
             logView.setText(text);
@@ -329,12 +590,13 @@ public class MainActivity extends Activity {
         return String.format("%.2f GB", bytes / 1073741824.0);
     }
 
-    // ---------------------------------------------------------------- 动作
+    // ================================================================ 运行页动作
 
     private void startServer() {
         requestNotificationPermissionIfNeeded();
         if (versions.currentTag() == null) {
-            toast("还没有安装服务端，请先「检查更新」并下载");
+            toast("还没有安装服务端，先到「更新」页下载");
+            switchPage(PAGE_UPDATE);
             return;
         }
         Intent intent = new Intent(this, ServerService.class);
@@ -344,6 +606,7 @@ public class MainActivity extends Activity {
         } else {
             startService(intent);
         }
+        switchPage(PAGE_RUN);
     }
 
     private void stopServer() {
@@ -372,48 +635,36 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 长按「检查更新」打开：可换 GitHub API 地址与仓库、可设下载镜像前缀。 */
-    private void showSettingsDialog() {
-        float d = getResources().getDisplayMetrics().density;
-        int pad = (int) (20 * d);
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(pad, pad / 2, pad, 0);
+    private void copyWorkDir() {
+        String dir = ServerPaths.workDir(this).getAbsolutePath();
+        ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(ClipData.newPlainText("dir", dir));
+            toast("已复制 " + dir);
+        }
+    }
 
-        final EditText apiInput = new EditText(this);
-        apiInput.setHint("https://api.github.com");
-        apiInput.setText(UpdateClient.apiBase(this));
-        apiInput.setTextSize(13);
-        box.addView(apiInput);
+    private void openBatterySettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Exception first) {
+            try {
+                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Exception second) {
+                toast("请手动到系统设置里把本应用设为「不受限制」");
+            }
+        }
+    }
 
-        final EditText repoInput = new EditText(this);
-        repoInput.setHint("owner/repo");
-        repoInput.setText(UpdateClient.repo(this));
-        repoInput.setTextSize(13);
-        box.addView(repoInput);
+    // ================================================================ 设置页动作
 
-        final EditText mirrorInput = new EditText(this);
-        mirrorInput.setHint("下载镜像前缀，可留空");
-        mirrorInput.setText(Prefs.get(this, "download_mirror", ""));
-        mirrorInput.setTextSize(13);
-        box.addView(mirrorInput);
-
-        new AlertDialog.Builder(this)
-                .setTitle("下载源设置")
-                .setMessage("手机直连 GitHub 不通时可改这里。API 地址需返回与 GitHub 相同的 JSON；"
-                        + "下载镜像前缀会拼在 https://github.com/... 前面（例如 https://ghfast.top/）。")
-                .setView(box)
-                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dlg, int w) {
-                        Prefs.put(MainActivity.this, "api_base", apiInput.getText().toString().trim());
-                        Prefs.put(MainActivity.this, "repo", repoInput.getText().toString().trim());
-                        Prefs.put(MainActivity.this, "download_mirror", mirrorInput.getText().toString().trim());
-                        toast("已保存");
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
+    private void saveSource() {
+        Prefs.put(this, "api_base", apiInput.getText().toString().trim());
+        Prefs.put(this, "repo", repoInput.getText().toString().trim());
+        Prefs.put(this, "download_mirror", mirrorInput.getText().toString().trim());
+        toast("已保存下载源设置");
     }
 
     private void showModeDialog() {
@@ -458,21 +709,7 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    private void openBatterySettings() {
-        try {
-            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-            intent.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
-        } catch (Exception first) {
-            try {
-                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
-            } catch (Exception second) {
-                toast("请手动到系统设置里把本应用设为「不受限制」");
-            }
-        }
-    }
-
-    // ---------------------------------------------------------------- 版本管理
+    // ================================================================ 版本管理
 
     private void doCheck() {
         if (busy) {
@@ -501,7 +738,7 @@ public class MainActivity extends Activity {
                             installBtn.setEnabled(true);
                             String cur = versions.currentTag();
                             StringBuilder sb = new StringBuilder();
-                            sb.append("最新版本 ").append(latest.tag);
+                            sb.append("最新 ").append(latest.tag);
                             if (latest.binarySize > 0) {
                                 sb.append("　").append(fmtSize(latest.binarySize));
                             }
@@ -510,9 +747,7 @@ public class MainActivity extends Activity {
                             } else if (cur != null) {
                                 sb.append("\n可更新（当前 ").append(cur).append("）");
                             }
-                            if (list.size() > 1) {
-                                sb.append("\n历史上还有 ").append(list.size() - 1).append(" 个版本可选，可用「手动选择版本」");
-                            }
+                            sb.append("\n共找到 ").append(list.size()).append(" 个可用版本");
                             versionHint.setText(sb.toString());
                             refresh();
                         }
@@ -524,7 +759,7 @@ public class MainActivity extends Activity {
                             busy = false;
                             checkBtn.setEnabled(true);
                             versionHint.setText("检查失败：" + e.getMessage()
-                                    + "\n提示：长按「检查更新」可设置镜像地址（手机直连 GitHub 不通时用）");
+                                    + "\n请到「设置」页确认下载源（手机直连 GitHub 常不通）");
                         }
                     });
                 }
@@ -532,7 +767,6 @@ public class MainActivity extends Activity {
         }, "check-update").start();
     }
 
-    /** 下载按钮：运行中先停下来（替换二进制时不能占用）。 */
     private void doInstallOrStop() {
         if (busy) {
             toast("正在忙，请稍候");
@@ -605,7 +839,7 @@ public class MainActivity extends Activity {
                         @Override
                         public void run() {
                             finishBusy();
-                            versionHint.setText("已安装 " + release.tag + "，点「启动」即可运行");
+                            versionHint.setText("已安装 " + release.tag + "，到「运行」页点启动即可");
                             toast("更新完成");
                             refresh();
                         }
@@ -661,16 +895,14 @@ public class MainActivity extends Activity {
                         refresh();
                     }
                 })
-                .setNeutralButton("删除某个版本", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        showDeleteDialog(installed);
-                    }
-                })
                 .show();
     }
 
     private void showDeleteDialog(final List<VersionManager.Installed> installed) {
+        if (installed == null || installed.isEmpty()) {
+            toast("还没有安装任何版本");
+            return;
+        }
         final String[] items = new String[installed.size()];
         for (int i = 0; i < installed.size(); i++) {
             items[i] = installed.get(i).tag;
@@ -688,57 +920,6 @@ public class MainActivity extends Activity {
                         versions.delete(tag);
                         toast("已删除 " + tag);
                         refresh();
-                    }
-                })
-                .show();
-    }
-
-    private void showCleanDialog() {
-        final String[] options = new String[]{
-                "清理服务端版本（保留游戏数据）",
-                "清理游戏数据（世界、配置、日志）",
-                "全部清理（版本 + 游戏数据）"
-        };
-        new AlertDialog.Builder(this)
-                .setTitle("清理")
-                .setItems(options, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int which) {
-                        if (PumpkinServer.get().isRunning()) {
-                            toast("请先停止服务端");
-                            return;
-                        }
-                        switch (which) {
-                            case 0:
-                                versions.clearAllVersions();
-                                latest = null;
-                                toast("已清理所有服务端版本");
-                                refresh();
-                                break;
-                            case 1:
-                                confirm("确定删除世界存档、配置和日志吗？此操作不可恢复。", new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        VersionManager.clearServerData(MainActivity.this);
-                                        toast("已清理游戏数据");
-                                        refresh();
-                                    }
-                                });
-                                break;
-                            default:
-                                confirm("确定清空全部数据吗？包括所有已下载的服务端版本和世界存档，此操作不可恢复。",
-                                        new Runnable() {
-                                            @Override
-                                            public void run() {
-                                                versions.clearAllVersions();
-                                                VersionManager.clearServerData(MainActivity.this);
-                                                latest = null;
-                                                toast("已清空全部数据");
-                                                refresh();
-                                            }
-                                        });
-                                break;
-                        }
                     }
                 })
                 .show();
