@@ -81,6 +81,7 @@ public class MainActivity extends Activity {
 
     // 更新页
     private TextView versionCurrent;
+    private TextView versionSelected;
     private TextView versionInstalled;
     private TextView versionHint;
     private ProgressBar progress;
@@ -435,6 +436,16 @@ public class MainActivity extends Activity {
         versionInstalled = UiKit.label(this, "");
         verCard.addView(versionInstalled);
 
+        // 单独一块显示「当前选中要下载哪个版本」，下载按钮上就不必再挤版本号了
+        versionSelected = UiKit.value(this, "");
+        versionSelected.setTextSize(15);
+        versionSelected.setTypeface(Typeface.DEFAULT_BOLD);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.topMargin = UiKit.dp(this, 12);
+        versionSelected.setLayoutParams(slp);
+        verCard.addView(versionSelected);
+
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(1000);
         progress.setVisibility(View.GONE);
@@ -539,8 +550,8 @@ public class MainActivity extends Activity {
         // 关于
         LinearLayout aboutCard = UiKit.card(this);
         aboutCard.addView(UiKit.cardTitle(this, "关于"));
-        aboutCard.addView(UiKit.value(this, "壳版本 " + versionName()));
-        Button checkShellBtn = UiKit.button(this, "检查壳更新", false);
+        aboutCard.addView(UiKit.value(this, "版本 " + versionName()));
+        Button checkShellBtn = UiKit.button(this, "检查更新", false);
         aboutCard.addView(UiKit.buttonRow(this, checkShellBtn));
         Button battBtn2 = UiKit.button(this, "电池优化设置", false);
         Button dirBtn = UiKit.button(this, "数据目录路径", false);
@@ -709,11 +720,11 @@ public class MainActivity extends Activity {
             return;
         }
         float tabWidth = navRow.getWidth() / 3f;
-        // 小胶囊，只罩住图标那一行（SukiSU / Material 3 就是这个做法），
-        // 而不是铺满整个 tab —— 铺满会变成一块大方块。
-        int pillW = Math.max(UiKit.dp(this, 44),
-                Math.min((int) (tabWidth * 0.70f), UiKit.dp(this, 72)));
-        int pillH = UiKit.dp(this, 34);
+        // 小胶囊，只罩住图标那一行（SukiSU / Material 3 的做法）：
+        // 太宽会变成一块椭圆药丸，所以收紧到接近图标尺寸。
+        int pillW = Math.max(UiKit.dp(this, 38),
+                Math.min((int) (tabWidth * 0.56f), UiKit.dp(this, 52)));
+        int pillH = UiKit.dp(this, 32);
         int topMargin = UiKit.dp(this, 6);
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) navIndicator.getLayoutParams();
         if (lp.width != pillW || lp.height != pillH) {
@@ -790,13 +801,13 @@ public class MainActivity extends Activity {
         String cur = versions.currentTag();
         List<VersionManager.Installed> installed = versions.listInstalled();
         versionCurrent.setText(cur == null ? "尚未安装服务端" : cur);
-        if (selected == null) {
-            installBtn.setText("下载");
-        } else if (versions.isInstalled(selected.tag)) {
-            installBtn.setText("重新下载 " + selected.tag);
-        } else {
-            installBtn.setText("下载 " + selected.tag);
+        if (versionSelected != null) {
+            versionSelected.setText(selected == null
+                    ? "未选择要下载的版本"
+                    : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
         }
+        installBtn.setText(selected != null && versions.isInstalled(selected.tag)
+                ? "重新下载" : "下载");
         StringBuilder sb = new StringBuilder();
         sb.append("已安装 ").append(installed.size()).append(" 个版本");
         if (installed.size() > 1) {
@@ -956,25 +967,23 @@ public class MainActivity extends Activity {
 
     /** 根据当前选中的版本刷新提示文案。 */
     private void updateVersionHint() {
+        if (versionSelected != null) {
+            versionSelected.setText(selected == null
+                    ? "未选择要下载的版本"
+                    : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
+        }
         if (selected == null) {
             versionHint.setText("点「检查更新」获取可用版本列表");
             return;
         }
         String cur = versions.currentTag();
         StringBuilder sb = new StringBuilder();
-        sb.append("已选中 ").append(selected.tag);
-        if (selected.binarySize > 0) {
-            sb.append("　").append(fmtSize(selected.binarySize));
-        }
-        if (selected.publishedAt != null && selected.publishedAt.length() >= 10) {
-            sb.append("　").append(selected.publishedAt.substring(0, 10));
-        }
-        sb.append("\n共 ").append(available.size())
+        sb.append("共 ").append(available.size())
                 .append(" 个可用版本，默认选最新的；点「选择版本」可换");
         if (cur != null && cur.equals(selected.tag)) {
             sb.append("\n（这就是当前运行的版本）");
         } else if (versions.isInstalled(selected.tag)) {
-            sb.append("\n（该版本已下载，可到「切换 / 回滚」直接启用）");
+            sb.append("\n（该版本已下载，到「运行」页可切换启用）");
         }
         versionHint.setText(sb.toString());
     }
@@ -1305,9 +1314,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 检查壳（本 App）自身有没有新版本。 */
+    /** 检查本应用（南瓜坞）自身有没有新版本。 */
     private void checkShellUpdate() {
-        toast("正在检查壳更新…");
+        toast("正在检查更新…");
         new Thread(new Runnable() {
             @Override
             public void run() {
