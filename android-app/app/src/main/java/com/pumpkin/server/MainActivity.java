@@ -113,6 +113,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        installCrashHandler();
         applyEdgeToEdge();
         versions = new VersionManager(this);
         updates = new UpdateClient(this);
@@ -124,6 +125,40 @@ public class MainActivity extends Activity {
         requestNotificationPermissionIfNeeded();
         autoCheckForUpdate();
         ui.post(ticker);
+    }
+
+    /**
+     * 崩溃兜底：把堆栈写到可直接取出的位置
+     * （Android/data/com.pumpkin.server/files/last_crash.txt），
+     * 否则这种「一打开就闪退」的问题没法定位。
+     */
+    private void installCrashHandler() {
+        final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread thread, Throwable ex) {
+                try {
+                    File dir = getExternalFilesDir(null);
+                    if (dir == null) {
+                        dir = getFilesDir();
+                    }
+                    File f = new File(dir, "last_crash.txt");
+                    java.io.PrintWriter w = new java.io.PrintWriter(new java.io.FileWriter(f, false));
+                    w.println("时间: " + new java.util.Date());
+                    w.println("线程: " + thread.getName());
+                    w.println("壳版本: " + versionName());
+                    w.println("Android API: " + Build.VERSION.SDK_INT);
+                    w.println("---- 堆栈 ----");
+                    ex.printStackTrace(w);
+                    w.close();
+                } catch (Throwable ignored) {
+                    // 写日志本身失败就算了
+                }
+                if (previous != null) {
+                    previous.uncaughtException(thread, ex);
+                }
+            }
+        });
     }
 
     /**
@@ -156,15 +191,24 @@ public class MainActivity extends Activity {
             public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
                 int top;
                 int bottom;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-                    top = bars.top;
-                    bottom = bars.bottom;
-                } else {
-                    top = insets.getSystemWindowInsetTop();
-                    bottom = insets.getSystemWindowInsetBottom();
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                        top = bars.top;
+                        bottom = bars.bottom;
+                    } else {
+                        top = insets.getSystemWindowInsetTop();
+                        bottom = insets.getSystemWindowInsetBottom();
+                    }
+                } catch (Throwable t) {
+                    // 任何异常都不要让界面崩掉，退化为无内边距
+                    return insets;
                 }
-                v.setPadding(0, top, 0, bottom);
+                // 只在值真正变化时改 padding：否则「改 padding → 重新分发 insets」会互相触发，
+                // 在部分 ROM 上形成死循环导致启动即闪退。
+                if (v.getPaddingTop() != top || v.getPaddingBottom() != bottom) {
+                    v.setPadding(0, top, 0, bottom);
+                }
                 return insets;
             }
         });

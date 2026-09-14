@@ -39,15 +39,30 @@ public final class BlurBackdrop {
     private Bitmap bitmap;
     private long lastDraw;
 
+    /** 把录制安排在帧边界执行：不在 onDraw 里嵌套录制（那会崩），也不立即录制（那样会闪）。 */
+    private final Runnable recordTask = new Runnable() {
+        @Override
+        public void run() {
+            if (!target.canUseRenderNode()) {
+                return;
+            }
+            int w = target.getWidth();
+            int h = target.getHeight();
+            if (w <= 0 || h <= 0) {
+                return;
+            }
+            try {
+                recordInto(target.renderNode(), w, h);
+                target.invalidate();
+            } catch (Throwable ignored) {
+                // 录制失败不致命，下一轮再试
+            }
+        }
+    };
+
     public BlurBackdrop(View source, BlurBackdropView target) {
         this.source = source;
         this.target = target;
-        target.setRecorder(new BlurBackdropView.Recorder() {
-            @Override
-            public void record(RenderNode node, int width, int height) {
-                recordInto(node, width, height);
-            }
-        });
     }
 
     /** 请求刷新（带节流）。滚动回调、页面切换、定时器都可以调它。 */
@@ -65,12 +80,12 @@ public final class BlurBackdrop {
 
         try {
             if (target.canUseRenderNode()) {
-                // 不在这里录制：只标脏，真正的录制发生在 onDraw（同一帧内完成）
-                target.markDirty();
+                target.removeCallbacks(recordTask);
+                target.postOnAnimation(recordTask);
             } else {
                 drawSoftware(w, h);
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
             // 视图正在销毁等情况下跳过这一轮
         }
     }
