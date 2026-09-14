@@ -65,7 +65,6 @@ public class MainActivity extends Activity {
     private int currentPage = 0;
     private final TextView[] tabIcons = new TextView[3];
     private final TextView[] tabLabels = new TextView[3];
-    private final LinearLayout[] tabViews = new LinearLayout[3];
     private FrameLayout contentArea;
     private BlurBackdropView navBlur;
     private BlurBackdrop backdrop;
@@ -87,8 +86,9 @@ public class MainActivity extends Activity {
     private ProgressBar progress;
     private Button installBtn;
     private Button checkBtn;
-    private Button pauseBtn;
     private Button deleteTaskBtn;
+    private TextView downloadHint;
+    private TextView localCount;
     private View dotView;
     private Downloader downloader;
     private Downloader.Listener downloadListener;
@@ -419,10 +419,11 @@ public class MainActivity extends Activity {
         ScrollView sv = pageContainer();
         LinearLayout col = columnOf(sv);
 
-        col.addView(UiKit.header(this, "服务端版本", "从 Releases 下载 / 切换 / 回滚"));
+        col.addView(UiKit.header(this, "服务端版本", "检查 · 下载 · 清理"));
 
-        LinearLayout verCard = UiKit.card(this);
-        verCard.addView(UiKit.cardTitle(this, "当前版本"));
+        // ==================== ① 版本信息 ====================
+        LinearLayout infoCard = UiKit.card(this);
+        infoCard.addView(UiKit.cardTitle(this, "当前版本"));
 
         versionCurrent = UiKit.value(this, "");
         versionCurrent.setTextSize(16);
@@ -431,12 +432,11 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         vp.topMargin = UiKit.dp(this, 10);
         versionCurrent.setLayoutParams(vp);
-        verCard.addView(versionCurrent);
+        infoCard.addView(versionCurrent);
 
         versionInstalled = UiKit.label(this, "");
-        verCard.addView(versionInstalled);
+        infoCard.addView(versionInstalled);
 
-        // 单独一块显示「当前选中要下载哪个版本」，下载按钮上就不必再挤版本号了
         versionSelected = UiKit.value(this, "");
         versionSelected.setTextSize(15);
         versionSelected.setTypeface(Typeface.DEFAULT_BOLD);
@@ -444,7 +444,23 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         slp.topMargin = UiKit.dp(this, 12);
         versionSelected.setLayoutParams(slp);
-        verCard.addView(versionSelected);
+        infoCard.addView(versionSelected);
+
+        versionHint = UiKit.label(this, "");
+        infoCard.addView(versionHint);
+
+        checkBtn = UiKit.button(this, "检查更新", false);
+        Button pickBtn = UiKit.button(this, "选择版本", false);
+        infoCard.addView(UiKit.buttonRow(this, checkBtn, pickBtn));
+        col.addView(infoCard);
+
+        // ==================== ② 下载（独立一块） ====================
+        LinearLayout dlCard = UiKit.card(this);
+        dlCard.addView(UiKit.cardTitle(this, "下载"));
+
+        downloadHint = UiKit.label(this,
+                "点「下载」开始。下载中按钮会变成「暂停」，暂停后才能删除下载任务。");
+        dlCard.addView(downloadHint);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(1000);
@@ -455,35 +471,30 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, UiKit.dp(this, 6));
         pp.topMargin = UiKit.dp(this, 12);
         progress.setLayoutParams(pp);
-        verCard.addView(progress);
+        dlCard.addView(progress);
 
-        versionHint = UiKit.label(this, "");
-        verCard.addView(versionHint);
-
-        // ① 检查
-        checkBtn = UiKit.button(this, "检查更新", false);
-        Button pickBtn = UiKit.button(this, "选择版本", false);
-        verCard.addView(UiKit.buttonRow(this, checkBtn, pickBtn));
-
-        // ② 下载：下载 / 暂停（暂停后按钮变成“继续”，另有删除任务）
+        // 一个按钮承担三态：下载 → 暂停 → 继续
         installBtn = UiKit.button(this, "下载", true);
-        pauseBtn = UiKit.button(this, "暂停", false);
-        pauseBtn.setEnabled(false);
-        verCard.addView(UiKit.buttonRow(this, installBtn, pauseBtn));
+        installBtn.setEnabled(false);
+        dlCard.addView(UiKit.buttonRow(this, installBtn));
 
         deleteTaskBtn = UiKit.button(this, "删除下载任务", false);
         deleteTaskBtn.setEnabled(false);
-        verCard.addView(UiKit.buttonRow(this, deleteTaskBtn));
+        dlCard.addView(UiKit.buttonRow(this, deleteTaskBtn));
+        col.addView(dlCard);
 
-        // ③ 删除已安装的版本（可单独挑一个删）
-        Button deleteBtn = UiKit.button(this, "删除已安装版本", false);
-        verCard.addView(UiKit.buttonRow(this, deleteBtn));
-        col.addView(verCard);
+        // ==================== ③ 本地版本（独立一块） ====================
+        LinearLayout localCard = UiKit.card(this);
+        localCard.addView(UiKit.cardTitle(this, "本地版本"));
+        localCount = UiKit.label(this, "");
+        localCard.addView(localCount);
+        Button deleteBtn = UiKit.button(this, "删除已安装的版本", false);
+        localCard.addView(UiKit.buttonRow(this, deleteBtn));
+        col.addView(localCard);
 
         checkBtn.setOnClickListener(v -> doCheck());
         pickBtn.setOnClickListener(v -> showVersionPicker());
-        installBtn.setOnClickListener(v -> doInstallOrStop());
-        pauseBtn.setOnClickListener(v -> onPauseClicked());
+        installBtn.setOnClickListener(v -> onDownloadButtonClicked());
         deleteTaskBtn.setOnClickListener(v -> onDeleteTaskClicked());
         deleteBtn.setOnClickListener(v -> showDeleteDialog(versions.listInstalled()));
 
@@ -816,6 +827,11 @@ public class MainActivity extends Activity {
         sb.append("　占用 ").append(fmtSize(VersionManager.dirSize(versions.getVersionsDir())));
         sb.append("\n游戏数据 ").append(fmtSize(VersionManager.dirSize(ServerPaths.workDir(this))));
         versionInstalled.setText(sb.toString());
+        if (localCount != null) {
+            localCount.setText(installed.isEmpty()
+                    ? "还没有安装任何版本"
+                    : "已安装 " + installed.size() + " 个，可单独删除其中一个");
+        }
 
         String text = server.tailLog();
         String display = text.isEmpty() ? "（还没有日志）\n启动服务器后这里会实时输出" : text;
@@ -1109,17 +1125,17 @@ public class MainActivity extends Activity {
         busy = true;
         progress.setVisibility(View.VISIBLE);
         progress.setProgress(0);
-        versionHint.setText("正在下载 " + release.tag + " …");
+        downloadHint.setText("正在下载 " + release.tag + " …");
 
         downloadListener = new Downloader.Listener() {
             @Override
             public void onProgress(long done, long total) {
                 if (total > 0) {
                     progress.setProgress((int) (done * 1000 / total));
-                    versionHint.setText("下载中 " + fmtSize(done) + " / " + fmtSize(total)
+                    downloadHint.setText("下载中 " + fmtSize(done) + " / " + fmtSize(total)
                             + "（" + (done * 100 / total) + "%）");
                 } else {
-                    versionHint.setText("下载中 " + fmtSize(done));
+                    downloadHint.setText("下载中 " + fmtSize(done));
                 }
                 updateDownloadButtons();
             }
@@ -1127,7 +1143,7 @@ public class MainActivity extends Activity {
             @Override
             public void onSourceFailed(String url, String reason) {
                 String shortUrl = url.length() > 52 ? url.substring(0, 52) + "…" : url;
-                versionHint.setText("这个下载源不可用，正在自动换源…\n" + shortUrl);
+                downloadHint.setText("这个下载源不可用，正在自动换源…\n" + shortUrl);
             }
 
             @Override
@@ -1135,7 +1151,7 @@ public class MainActivity extends Activity {
                 try {
                     versions.install(release.tag, file);
                     finishBusy();
-                    versionHint.setText("已安装 " + release.tag + "，到「运行」页启动或切换");
+                    downloadHint.setText("已安装 " + release.tag + "，到「运行」页启动或切换");
                     toast("下载完成");
                     refresh();
                 } catch (Exception e) {
@@ -1147,7 +1163,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPaused(long done, long total) {
                 busy = false;
-                versionHint.setText("已暂停 " + fmtSize(done)
+                downloadHint.setText("已暂停 " + fmtSize(done)
                         + (total > 0 ? " / " + fmtSize(total) : "")
                         + "\n点「继续」接着下，或点「删除下载任务」丢弃");
                 updateDownloadButtons();
@@ -1156,45 +1172,73 @@ public class MainActivity extends Activity {
             @Override
             public void onFailed(String message) {
                 finishBusy();
-                versionHint.setText("下载失败：" + message);
+                downloadHint.setText("下载失败：" + message);
             }
         };
         downloader.start(release, downloadListener);
         updateDownloadButtons();
     }
 
-    /** 暂停 / 继续。 */
-    private void onPauseClicked() {
+    /** 下载按钮：一个按钮承担三态 —— 下载 → 暂停 → 继续。 */
+    private void onDownloadButtonClicked() {
         if (downloader.isRunning()) {
             downloader.pause();
             toast("正在暂停…");
             return;
         }
-        if (downloader.hasTask() && downloadListener != null) {
+        if (downloader.hasTask()) {
+            if (downloadListener == null) {
+                return;
+            }
             downloader.start(null, downloadListener);
             progress.setVisibility(View.VISIBLE);
-            versionHint.setText("正在继续下载…");
+            downloadHint.setText("正在继续下载…");
             updateDownloadButtons();
+            return;
         }
+        doInstallOrStop();
     }
 
-    /** 删除下载任务（丢弃已下载部分）。 */
+    /** 删除下载任务：只有暂停状态下才允许，且会丢弃已下载的全部文件。 */
     private void onDeleteTaskClicked() {
-        downloader.deleteTask();
-        busy = false;
-        progress.setVisibility(View.GONE);
-        versionHint.setText("下载任务已删除");
-        updateDownloadButtons();
+        if (downloader.isRunning()) {
+            toast("请先暂停下载");
+            return;
+        }
+        if (!downloader.hasTask()) {
+            toast("当前没有可删除的下载任务");
+            return;
+        }
+        confirm("删除下载任务会丢弃已经下载的部分，确定吗？", new Runnable() {
+            @Override
+            public void run() {
+                downloader.deleteTask();
+                busy = false;
+                progress.setProgress(0);
+                progress.setVisibility(View.GONE);
+                downloadHint.setText("下载任务已删除，已下载的文件已清理。");
+                updateDownloadButtons();
+                refresh();
+            }
+        });
     }
 
-    /** 按下载状态刷新按钮可用性与文案。 */
+    /** 按下载状态刷新按钮：下载按钮三态，「删除下载任务」只在暂停后可用。 */
     private void updateDownloadButtons() {
         boolean running = downloader.isRunning();
-        boolean hasTask = downloader.hasTask();
-        pauseBtn.setText(running ? "暂停" : "继续");
-        pauseBtn.setEnabled(running || hasTask);
-        deleteTaskBtn.setEnabled(hasTask);
-        installBtn.setEnabled(!running);
+        boolean paused = downloader.hasTask() && !running;
+        if (running) {
+            installBtn.setText("暂停");
+            installBtn.setEnabled(true);
+        } else if (paused) {
+            installBtn.setText("继续");
+            installBtn.setEnabled(true);
+        } else {
+            installBtn.setText(selected != null && versions.isInstalled(selected.tag)
+                    ? "重新下载" : "下载");
+            installBtn.setEnabled(selected != null);
+        }
+        deleteTaskBtn.setEnabled(paused);   // 只有暂停后才亮，避免误删
         checkBtn.setEnabled(!running);
     }
 

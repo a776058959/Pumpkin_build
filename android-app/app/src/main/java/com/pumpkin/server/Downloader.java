@@ -157,12 +157,20 @@ public final class Downloader {
         pauseRequested = true;
     }
 
-    /** 删除任务：停止下载并丢弃已下载的部分。 */
+    /** 删除任务：停止下载，并把已经下载的文件全部清理掉。 */
     public void deleteTask() {
         pauseRequested = true;
         File part = partFile();
         if (part != null && part.isFile()) {
             part.delete();
+        }
+        // 顺手清空下载缓存目录：之前中断留下的残留也一并清掉
+        File dir = ServerPaths.downloadCacheDir(ctx);
+        File[] leftovers = dir.listFiles();
+        if (leftovers != null) {
+            for (File f : leftovers) {
+                f.delete();
+            }
         }
         forget();
     }
