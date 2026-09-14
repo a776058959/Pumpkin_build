@@ -27,6 +27,7 @@ import android.view.WindowInsetsController;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.graphics.drawable.GradientDrawable;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -81,6 +82,11 @@ public class MainActivity extends Activity {
     private ProgressBar progress;
     private Button installBtn;
     private Button checkBtn;
+    private Button pauseBtn;
+    private Button deleteTaskBtn;
+    private View dotView;
+    private Downloader downloader;
+    private Downloader.Listener downloadListener;
 
     // 设置页
     private TextView modeValue;
@@ -110,11 +116,13 @@ public class MainActivity extends Activity {
         applyEdgeToEdge();
         versions = new VersionManager(this);
         updates = new UpdateClient(this);
+        downloader = new Downloader(this);
         View root = buildUi();
         setContentView(root);
         applyInsets(root);
         switchPage(PAGE_RUN);
         requestNotificationPermissionIfNeeded();
+        autoCheckForUpdate();
         ui.post(ticker);
     }
 
@@ -180,6 +188,9 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         cancelRequested = true;
+        if (downloader != null && downloader.isRunning()) {
+            downloader.pause();   // 退到后台时暂停，保留断点，下次可继续
+        }
         if (backdrop != null) {
             backdrop.release();
         }
@@ -301,6 +312,10 @@ public class MainActivity extends Activity {
         Button battBtn = UiKit.button(this, "电池优化", false);
         Button copyBtn = UiKit.button(this, "复制地址", false);
         statusCard.addView(UiKit.buttonRow(this, battBtn, copyBtn));
+
+        // 用哪个版本运行，属于「运行」的事，所以放在这一页
+        Button switchBtn = UiKit.button(this, "选择运行版本", false);
+        statusCard.addView(UiKit.buttonRow(this, switchBtn));
         col.addView(statusCard);
 
         LinearLayout consoleCard = UiKit.card(this);
@@ -347,6 +362,7 @@ public class MainActivity extends Activity {
         stopBtn.setOnClickListener(v -> stopServer());
         battBtn.setOnClickListener(v -> openBatterySettings());
         copyBtn.setOnClickListener(v -> copyAddress());
+        switchBtn.setOnClickListener(v -> showSwitchDialog());
         sendBtn.setOnClickListener(v -> sendCommand());
 
         return sv;
@@ -389,22 +405,31 @@ public class MainActivity extends Activity {
         versionHint = UiKit.label(this, "");
         verCard.addView(versionHint);
 
+        // ① 检查
         checkBtn = UiKit.button(this, "检查更新", false);
         Button pickBtn = UiKit.button(this, "选择版本", false);
         verCard.addView(UiKit.buttonRow(this, checkBtn, pickBtn));
 
+        // ② 下载：下载 / 暂停（暂停后按钮变成“继续”，另有删除任务）
         installBtn = UiKit.button(this, "下载", true);
-        verCard.addView(UiKit.buttonRow(this, installBtn));
+        pauseBtn = UiKit.button(this, "暂停", false);
+        pauseBtn.setEnabled(false);
+        verCard.addView(UiKit.buttonRow(this, installBtn, pauseBtn));
 
-        Button switchBtn = UiKit.button(this, "切换 / 回滚", false);
-        Button deleteBtn = UiKit.button(this, "删除版本", false);
-        verCard.addView(UiKit.buttonRow(this, switchBtn, deleteBtn));
+        deleteTaskBtn = UiKit.button(this, "删除下载任务", false);
+        deleteTaskBtn.setEnabled(false);
+        verCard.addView(UiKit.buttonRow(this, deleteTaskBtn));
+
+        // ③ 删除已安装的版本（可单独挑一个删）
+        Button deleteBtn = UiKit.button(this, "删除已安装版本", false);
+        verCard.addView(UiKit.buttonRow(this, deleteBtn));
         col.addView(verCard);
 
         checkBtn.setOnClickListener(v -> doCheck());
         pickBtn.setOnClickListener(v -> showVersionPicker());
         installBtn.setOnClickListener(v -> doInstallOrStop());
-        switchBtn.setOnClickListener(v -> showSwitchDialog());
+        pauseBtn.setOnClickListener(v -> onPauseClicked());
+        deleteTaskBtn.setOnClickListener(v -> onDeleteTaskClicked());
         deleteBtn.setOnClickListener(v -> showDeleteDialog(versions.listInstalled()));
 
         return sv;
@@ -471,6 +496,8 @@ public class MainActivity extends Activity {
         LinearLayout aboutCard = UiKit.card(this);
         aboutCard.addView(UiKit.cardTitle(this, "关于"));
         aboutCard.addView(UiKit.value(this, "壳版本 " + versionName()));
+        Button checkShellBtn = UiKit.button(this, "检查壳更新", false);
+        aboutCard.addView(UiKit.buttonRow(this, checkShellBtn));
         Button battBtn2 = UiKit.button(this, "电池优化设置", false);
         Button dirBtn = UiKit.button(this, "数据目录路径", false);
         aboutCard.addView(UiKit.buttonRow(this, battBtn2, dirBtn));
@@ -521,6 +548,7 @@ public class MainActivity extends Activity {
         }));
         battBtn2.setOnClickListener(v -> openBatterySettings());
         dirBtn.setOnClickListener(v -> copyWorkDir());
+        checkShellBtn.setOnClickListener(v -> checkShellUpdate());
 
         return sv;
     }
@@ -581,7 +609,24 @@ public class MainActivity extends Activity {
             icon.setText(icons[i]);
             icon.setTextSize(18);
             icon.setGravity(Gravity.CENTER);
-            inner.addView(icon, new LinearLayout.LayoutParams(
+
+            // 图标右上角挂一个小红点：有新版本时才亮，平时隐藏，不占地方也不打扰
+            FrameLayout iconBox = new FrameLayout(this);
+            iconBox.addView(icon, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER));
+            if (i == 1) {
+                dotView = new View(this);
+                GradientDrawable dot = new GradientDrawable();
+                dot.setShape(GradientDrawable.OVAL);
+                dot.setColor(0xFFFF5C6C);
+                dot.setStroke(UiKit.dp(this, 1.5f), 0xCC141824);
+                dotView.setBackground(dot);
+                dotView.setVisibility(View.GONE);
+                iconBox.addView(dotView, new FrameLayout.LayoutParams(
+                        UiKit.dp(this, 9), UiKit.dp(this, 9), Gravity.TOP | Gravity.END));
+            }
+            inner.addView(iconBox, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             TextView label = new TextView(this);
@@ -629,6 +674,9 @@ public class MainActivity extends Activity {
                     .scaleY(active ? 1.15f : 1f)
                     .setDuration(150)
                     .start();
+        }
+        if (index == PAGE_UPDATE) {
+            updateUpdateDot(false);   // 进过更新页就把提醒收起来
         }
         if (index == PAGE_RUN) {
             refresh();
@@ -968,80 +1016,106 @@ public class MainActivity extends Activity {
     }
 
     private void doDownloadInstall(final UpdateClient.Release release) {
+        if (downloader.isRunning()) {
+            toast("正在下载中");
+            return;
+        }
         busy = true;
-        cancelRequested = false;
-        installBtn.setEnabled(false);
-        checkBtn.setEnabled(false);
         progress.setVisibility(View.VISIBLE);
         progress.setProgress(0);
         versionHint.setText("正在下载 " + release.tag + " …");
 
-        new Thread(new Runnable() {
+        downloadListener = new Downloader.Listener() {
             @Override
-            public void run() {
+            public void onProgress(long done, long total) {
+                if (total > 0) {
+                    progress.setProgress((int) (done * 1000 / total));
+                    versionHint.setText("下载中 " + fmtSize(done) + " / " + fmtSize(total)
+                            + "（" + (done * 100 / total) + "%）");
+                } else {
+                    versionHint.setText("下载中 " + fmtSize(done));
+                }
+                updateDownloadButtons();
+            }
+
+            @Override
+            public void onSourceFailed(String url, String reason) {
+                String shortUrl = url.length() > 52 ? url.substring(0, 52) + "…" : url;
+                versionHint.setText("这个下载源不可用，正在自动换源…\n" + shortUrl);
+            }
+
+            @Override
+            public void onFinished(File file) {
                 try {
-                    File tmp = updates.download(release, new UpdateClient.Progress() {
-                        @Override
-                        public void onProgress(final long done, final long total) {
-                            ui.post(new Runnable() {
-                                @Override
-                                public void run() {
-                                    if (total > 0) {
-                                        progress.setProgress((int) (done * 1000 / total));
-                                        versionHint.setText("下载中 " + fmtSize(done) + " / " + fmtSize(total));
-                                    } else {
-                                        versionHint.setText("下载中 " + fmtSize(done));
-                                    }
-                                }
-                            });
-                        }
-
-                        @Override
-                        public boolean isRunning() {
-                            return !cancelRequested;
-                        }
-
-                        @Override
-                        public void onSourceFailed(final String url, final String reason) {
-                            ui.post(new Runnable() {
-                                @Override
-                                public void run() {
-                                    String shortUrl = url.length() > 52
-                                            ? url.substring(0, 52) + "…" : url;
-                                    versionHint.setText("这个下载源不可用，正在自动换源…\n"
-                                            + shortUrl + "\n" + reason);
-                                }
-                            });
-                        }
-                    });
-                    versions.install(release.tag, tmp);
-                    ui.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            finishBusy();
-                            versionHint.setText("已安装 " + release.tag + "，到「运行」页点启动即可");
-                            toast("更新完成");
-                            refresh();
-                        }
-                    });
-                } catch (final Exception e) {
-                    ui.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            finishBusy();
-                            versionHint.setText("下载/安装失败：" + e.getMessage());
-                        }
-                    });
+                    versions.install(release.tag, file);
+                    finishBusy();
+                    versionHint.setText("已安装 " + release.tag + "，到「运行」页启动或切换");
+                    toast("下载完成");
+                    refresh();
+                } catch (Exception e) {
+                    finishBusy();
+                    versionHint.setText("安装失败：" + e.getMessage());
                 }
             }
-        }, "download").start();
+
+            @Override
+            public void onPaused(long done, long total) {
+                busy = false;
+                versionHint.setText("已暂停 " + fmtSize(done)
+                        + (total > 0 ? " / " + fmtSize(total) : "")
+                        + "\n点「继续」接着下，或点「删除下载任务」丢弃");
+                updateDownloadButtons();
+            }
+
+            @Override
+            public void onFailed(String message) {
+                finishBusy();
+                versionHint.setText("下载失败：" + message);
+            }
+        };
+        downloader.start(release, downloadListener);
+        updateDownloadButtons();
+    }
+
+    /** 暂停 / 继续。 */
+    private void onPauseClicked() {
+        if (downloader.isRunning()) {
+            downloader.pause();
+            toast("正在暂停…");
+            return;
+        }
+        if (downloader.hasTask() && downloadListener != null) {
+            downloader.start(null, downloadListener);
+            progress.setVisibility(View.VISIBLE);
+            versionHint.setText("正在继续下载…");
+            updateDownloadButtons();
+        }
+    }
+
+    /** 删除下载任务（丢弃已下载部分）。 */
+    private void onDeleteTaskClicked() {
+        downloader.deleteTask();
+        busy = false;
+        progress.setVisibility(View.GONE);
+        versionHint.setText("下载任务已删除");
+        updateDownloadButtons();
+    }
+
+    /** 按下载状态刷新按钮可用性与文案。 */
+    private void updateDownloadButtons() {
+        boolean running = downloader.isRunning();
+        boolean hasTask = downloader.hasTask();
+        pauseBtn.setText(running ? "暂停" : "继续");
+        pauseBtn.setEnabled(running || hasTask);
+        deleteTaskBtn.setEnabled(hasTask);
+        installBtn.setEnabled(!running);
+        checkBtn.setEnabled(!running);
     }
 
     private void finishBusy() {
         busy = false;
         progress.setVisibility(View.GONE);
-        installBtn.setEnabled(true);
-        checkBtn.setEnabled(true);
+        updateDownloadButtons();
     }
 
     private void showSwitchDialog() {
@@ -1103,6 +1177,119 @@ public class MainActivity extends Activity {
                     }
                 })
                 .show();
+    }
+
+    /** 启动时静默检查一次更新；有新版本就在「更新」角标上点个红点。 */
+    private void autoCheckForUpdate() {
+        updateUpdateDot(Prefs.getBool(this, "has_newer", false));
+        long now = System.currentTimeMillis();
+        long last = 0;
+        try {
+            last = Long.parseLong(Prefs.get(this, "last_auto_check", "0"));
+        } catch (Exception ignored) {
+            last = 0;
+        }
+        if (now - last < 1800000L) {
+            // 半小时内不重复请求，避开 GitHub 的匿名限流
+            return;
+        }
+        Prefs.put(this, "last_auto_check", String.valueOf(now));
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final List<UpdateClient.Release> list = updates.fetchReleases();
+                    final boolean newer = !list.isEmpty() && !versions.isInstalled(list.get(0).tag);
+                    Prefs.putBool(MainActivity.this, "has_newer", newer);
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (available.isEmpty()) {
+                                available.addAll(list);
+                                if (selected == null && !list.isEmpty()) {
+                                    selected = list.get(0);
+                                }
+                                updateVersionHint();
+                                refresh();
+                            }
+                            updateUpdateDot(newer);
+                        }
+                    });
+                } catch (Exception ignored) {
+                    // 静默失败，不打扰用户
+                }
+            }
+        }, "auto-check").start();
+    }
+
+    private void updateUpdateDot(boolean show) {
+        if (dotView != null) {
+            dotView.setVisibility(show ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /** 检查壳（本 App）自身有没有新版本。 */
+    private void checkShellUpdate() {
+        toast("正在检查壳更新…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final UpdateClient.ShellAsset asset = updates.fetchShellAsset();
+                    long installed = 0;
+                    try {
+                        installed = getPackageManager()
+                                .getPackageInfo(getPackageName(), 0).lastUpdateTime;
+                    } catch (Exception ignored) {
+                        installed = 0;
+                    }
+                    final long installedTime = installed;
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (asset == null || asset.downloadUrl == null) {
+                                toast("没有找到壳的发布信息");
+                                return;
+                            }
+                            if (asset.updatedAt > installedTime + 120000L) {
+                                new AlertDialog.Builder(MainActivity.this)
+                                        .setTitle("壳有新版本")
+                                        .setMessage("服务器上的壳比你当前装的更新，要下载吗？")
+                                        .setPositiveButton("下载", new DialogInterface.OnClickListener() {
+                                            @Override
+                                            public void onClick(DialogInterface d, int w) {
+                                                openUrl(asset.downloadUrl);
+                                            }
+                                        })
+                                        .setNegativeButton("以后", null)
+                                        .show();
+                            } else {
+                                toast("壳已是最新");
+                            }
+                        }
+                    });
+                } catch (final Exception e) {
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            toast("检查失败：" + e.getMessage());
+                        }
+                    });
+                }
+            }
+        }, "shell-check").start();
+    }
+
+    private void openUrl(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception e) {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("url", url));
+            }
+            toast("无法打开浏览器，链接已复制");
+        }
     }
 
     private void confirm(String message, final Runnable onYes) {
