@@ -58,6 +58,7 @@ public class MainActivity extends Activity {
 
     private Button installBtn;
     private Button checkBtn;
+    private Button modeBtn;
 
     private TextView logView;
     private ScrollView logScroll;
@@ -146,6 +147,9 @@ public class MainActivity extends Activity {
         Button battBtn = UiKit.button(this, "电池优化", false);
         Button copyBtn = UiKit.button(this, "复制地址", false);
         statusCard.addView(UiKit.buttonRow(this, battBtn, copyBtn));
+
+        modeBtn = UiKit.button(this, "启动方式：普通", false);
+        statusCard.addView(UiKit.buttonRow(this, modeBtn));
         col.addView(statusCard);
 
         // ---------- 版本管理 ----------
@@ -240,6 +244,7 @@ public class MainActivity extends Activity {
         stopBtn.setOnClickListener(v -> stopServer());
         battBtn.setOnClickListener(v -> openBatterySettings());
         copyBtn.setOnClickListener(v -> copyAddress());
+        modeBtn.setOnClickListener(v -> showModeDialog());
         checkBtn.setOnClickListener(v -> doCheck());
         installBtn.setOnClickListener(v -> doInstallOrStop());
         switchBtn.setOnClickListener(v -> showSwitchDialog());
@@ -271,6 +276,9 @@ public class MainActivity extends Activity {
                 ? "未检测到局域网 IP（确认已连上 WiFi）"
                 : "Java " + lan + ":25565　·　基岩 " + lan + ":19132");
         dirText.setText("数据目录 " + ServerPaths.workDir(this).getAbsolutePath());
+        modeBtn.setText(Prefs.getBool(this, "root_mode", false)
+                ? "启动方式：Root（su，不改 SELinux）"
+                : "启动方式：普通（targetSdk 28 豁免）");
 
         // 版本信息
         String cur = versions.currentTag();
@@ -358,6 +366,48 @@ public class MainActivity extends Activity {
             cm.setPrimaryClip(ClipData.newPlainText("addr", text));
             toast("已复制 " + text);
         }
+    }
+
+    private void showModeDialog() {
+        final String[] items = new String[]{
+                "普通模式 — App 直接启动（依赖 targetSdk 28 的 SELinux 豁免）",
+                "Root 模式 — 通过 su 启动（不动 SELinux，不会被检测到）"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("选择服务端启动方式")
+                .setMessage("普通模式开箱即用。Root 模式通过 su 域运行，不受「私有目录禁止执行」的限制，"
+                        + "适合普通模式失效时使用（需要 Magisk 授权，首次会弹窗）。")
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        if (which == 0) {
+                            Prefs.putBool(MainActivity.this, "root_mode", false);
+                            toast("已切换到普通模式");
+                            refresh();
+                            return;
+                        }
+                        toast("正在检测 root 授权…");
+                        new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                final boolean ok = RootHelper.available();
+                                ui.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (ok) {
+                                            Prefs.putBool(MainActivity.this, "root_mode", true);
+                                            toast("已切换到 Root 模式");
+                                        } else {
+                                            toast("未获得 root 权限（su 不可用或未授权）");
+                                        }
+                                        refresh();
+                                    }
+                                });
+                            }
+                        }, "root-check").start();
+                    }
+                })
+                .show();
     }
 
     private void openBatterySettings() {

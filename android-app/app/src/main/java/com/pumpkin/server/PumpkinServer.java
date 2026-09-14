@@ -97,10 +97,19 @@ public final class PumpkinServer {
         appendLine("[app] 工作目录: " + workDir.getAbsolutePath());
 
         try {
-            ProcessBuilder pb = new ProcessBuilder(bin.getAbsolutePath());
-            pb.directory(workDir);
-            pb.redirectErrorStream(true);
-            process = pb.start();
+            boolean rootMode = Prefs.getBool(context, "root_mode", false);
+            if (rootMode && RootHelper.available()) {
+                appendLine("[app] 启动方式: Root（su 域，不改动 SELinux）");
+                process = RootHelper.start(workDir.getAbsolutePath(), bin.getAbsolutePath());
+            } else {
+                if (rootMode) {
+                    appendLine("[app] 未获得 root 授权，本次回退到普通模式");
+                }
+                ProcessBuilder pb = new ProcessBuilder(bin.getAbsolutePath());
+                pb.directory(workDir);
+                pb.redirectErrorStream(true);
+                process = pb.start();
+            }
             running = true;
             exitCode = Integer.MIN_VALUE;
             startedAt = System.currentTimeMillis();
