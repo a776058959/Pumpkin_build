@@ -3,6 +3,7 @@ package com.pumpkin.server;
 import android.content.Context;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
@@ -69,7 +70,12 @@ public final class UpdateClient {
     public List<Release> fetchReleases() throws IOException {
         List<Release> out = new ArrayList<>();
         String url = apiBase(ctx) + "/repos/" + repo(ctx) + "/releases?per_page=30";
-        JSONArray arr = new JSONArray(httpGet(url));
+        JSONArray arr;
+        try {
+            arr = new JSONArray(httpGet(url));
+        } catch (JSONException e) {
+            throw new IOException("解析 Releases 列表失败: " + e.getMessage());
+        }
         for (int i = 0; i < arr.length(); i++) {
             JSONObject rel = arr.optJSONObject(i);
             if (rel == null) {
