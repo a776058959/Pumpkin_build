@@ -156,6 +156,8 @@ jobs:
           git remote add origin https://github.com/Pumpkin-MC/Pumpkin.git
           git fetch -q --depth=1 origin "${{ needs.check.outputs.sha }}"
           git checkout -q FETCH_HEAD
+          # 上游的 WIT 定义在子模块 pumpkin-plugin-wit 里，必须一并拉取
+          git submodule update --init --recursive --depth=1
           echo "📦 上游提交: $(git log -1 --format='%h %s')"
 
       # 设置日期（使用 Bash 以确保跨平台兼容）
@@ -268,6 +270,8 @@ jobs:
           git remote add origin https://github.com/Pumpkin-MC/Pumpkin.git
           git fetch -q --depth=1 origin "${{ needs.check.outputs.sha }}"
           git checkout -q FETCH_HEAD
+          # 上游的 WIT 定义在子模块 pumpkin-plugin-wit 里，必须一并拉取
+          git submodule update --init --recursive --depth=1
           echo "📦 上游提交: $(git log -1 --format='%h %s')"
 
       - name: Set build date
