@@ -24,6 +24,7 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.view.animation.DecelerateInterpolator;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -59,6 +60,9 @@ public class MainActivity extends Activity {
     private View pageRun;
     private View pageUpdate;
     private View pageSettings;
+    private View navIndicator;
+    private ViewGroup navRow;
+    private int currentPage = 0;
     private final TextView[] tabIcons = new TextView[3];
     private final TextView[] tabLabels = new TextView[3];
     private final LinearLayout[] tabViews = new LinearLayout[3];
@@ -253,6 +257,13 @@ public class MainActivity extends Activity {
         // 注意：没有图片的 ImageView 高度是 0，必须先给一个高度，等导航栏测量完再同步真实高度，
         // 否则 BlurBackdrop 会因为取不到尺寸而永远不绘制。
         navBlur = new BlurBackdropView(this);
+        // 关键：模糊层也必须圆角。它垫在悬浮栏后面，如果保持直角矩形，
+        // 悬浮栏圆角「缺掉」的那四块就会露出方形模糊内容（看起来就是圆角坏了）。
+        GradientDrawable blurShape = new GradientDrawable();
+        blurShape.setColor(0x00000000);
+        blurShape.setCornerRadius(UiKit.dp(this, 26));
+        navBlur.setBackground(blurShape);
+        navBlur.setClipToOutline(true);
         FrameLayout.LayoutParams blurParams = navParams();
         blurParams.height = UiKit.dp(this, 76);
         root.addView(navBlur, blurParams);
@@ -612,31 +623,31 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- 底部导航
 
     private View buildBottomNav() {
-        LinearLayout nav = new LinearLayout(this);
-        nav.setOrientation(LinearLayout.HORIZONTAL);
+        FrameLayout nav = new FrameLayout(this);
         nav.setBackground(UiKit.glass(this, true));
         nav.setElevation(UiKit.dp(this, 10));
-        int pv = UiKit.dp(this, 10);
-        nav.setPadding(UiKit.dp(this, 6), pv, UiKit.dp(this, 6), pv);
+
+        // 选中指示器：垫在三个 tab 下面，切换页面时平滑滑过去（而不是瞬间跳）
+        navIndicator = new View(this);
+        navIndicator.setBackground(UiKit.navPill(this, true));
+        navIndicator.setElevation(UiKit.dp(this, 2));
+        nav.addView(navIndicator, new FrameLayout.LayoutParams(
+                UiKit.dp(this, 64), ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        navRow = row;
 
         String[] icons = new String[]{"▶", "⤓", "⚙"};
         String[] labels = new String[]{"运行", "更新", "设置"};
-        int px = UiKit.dp(this, 5);
-        int py = UiKit.dp(this, 7);
+        int px = UiKit.dp(this, 8);
+        int py = UiKit.dp(this, 9);
         for (int i = 0; i < 3; i++) {
             final int index = i;
-            // 外层负责等分宽度并留出左右空隙，内层才是带胶囊背景的「选中块」，
-            // 这样选中态是一块明显的小胶囊，而不是整条 1/3 宽的色带。
             LinearLayout tab = new LinearLayout(this);
+            tab.setOrientation(LinearLayout.VERTICAL);
+            tab.setGravity(Gravity.CENTER);
             tab.setPadding(px, py, px, py);
-
-            LinearLayout inner = new LinearLayout(this);
-            inner.setOrientation(LinearLayout.VERTICAL);
-            inner.setGravity(Gravity.CENTER);
-            int ip = UiKit.dp(this, 8);
-            inner.setPadding(ip, UiKit.dp(this, 8), ip, UiKit.dp(this, 8));
-            tab.addView(inner, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
             TextView icon = new TextView(this);
             icon.setText(icons[i]);
@@ -659,7 +670,7 @@ public class MainActivity extends Activity {
                 iconBox.addView(dotView, new FrameLayout.LayoutParams(
                         UiKit.dp(this, 9), UiKit.dp(this, 9), Gravity.TOP | Gravity.END));
             }
-            inner.addView(iconBox, new LinearLayout.LayoutParams(
+            tab.addView(iconBox, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             TextView label = new TextView(this);
@@ -669,18 +680,58 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             tlp.topMargin = UiKit.dp(this, 3);
-            inner.addView(label, tlp);
+            tab.addView(label, tlp);
 
             tabIcons[i] = icon;
             tabLabels[i] = label;
-            tabViews[i] = inner;
 
             tab.setOnClickListener(v -> switchPage(index));
-            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            nav.addView(tab, tp);
+            row.addView(tab, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         }
+        nav.addView(row, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return nav;
+    }
+
+    /** 把选中指示器移到第 index 个 tab 上；宽高按 tab 实际尺寸算。 */
+    private void moveIndicator(final int index, final boolean animate) {
+        if (navIndicator == null || navRow == null) {
+            return;
+        }
+        if (navRow.getWidth() <= 0) {
+            navRow.post(new Runnable() {
+                @Override
+                public void run() {
+                    moveIndicator(index, false);
+                }
+            });
+            return;
+        }
+        float tabWidth = navRow.getWidth() / 3f;
+        int inset = UiKit.dp(this, 6);
+        int insetY = UiKit.dp(this, 7);
+        int targetWidth = (int) (tabWidth - inset * 2);
+        View parent = (View) navIndicator.getParent();
+        int targetHeight = Math.max(0, parent.getHeight() - insetY * 2);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) navIndicator.getLayoutParams();
+        if (lp.width != targetWidth || lp.height != targetHeight) {
+            lp.width = targetWidth;
+            lp.height = targetHeight;
+            lp.topMargin = insetY;
+            navIndicator.setLayoutParams(lp);
+        }
+        float targetX = index * tabWidth + inset;
+        navIndicator.animate().cancel();
+        if (animate) {
+            navIndicator.animate()
+                    .translationX(targetX)
+                    .setDuration(260)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+        } else {
+            navIndicator.setTranslationX(targetX);
+        }
     }
 
     private void switchPage(int index) {
@@ -689,25 +740,17 @@ public class MainActivity extends Activity {
         pageSettings.setVisibility(index == PAGE_SETTINGS ? View.VISIBLE : View.GONE);
         for (int i = 0; i < 3; i++) {
             boolean active = (i == index);
-            // 选中项：主题色胶囊底 + 白色图标文字 + 轻微放大；未选中：暗色、缩小一点。
+            // 文字/图标：选中用白色加粗，未选中用暗色；指示器本身负责“选中块”
             tabIcons[i].setTextColor(active ? Color.WHITE : UiKit.TEXT_DIM);
             tabLabels[i].setTextColor(active ? Color.WHITE : UiKit.TEXT_DIM);
             tabLabels[i].setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
-            if (tabViews[i] != null) {
-                tabViews[i].setBackground(UiKit.navPill(this, active));
-                tabViews[i].setElevation(active ? UiKit.dp(this, 4) : 0);
-                tabViews[i].animate()
-                        .scaleX(active ? 1f : 0.94f)
-                        .scaleY(active ? 1f : 0.94f)
-                        .setDuration(150)
-                        .start();
-            }
             tabIcons[i].animate()
                     .scaleX(active ? 1.15f : 1f)
                     .scaleY(active ? 1.15f : 1f)
-                    .setDuration(150)
+                    .setDuration(180)
                     .start();
         }
+        moveIndicator(index, true);
         if (index == PAGE_UPDATE) {
             updateUpdateDot(false);   // 进过更新页就把提醒收起来
         }

@@ -240,17 +240,17 @@ public final class UiKit {
         return d;
     }
 
-    /** 底部导航选中项的胶囊底：主题色渐变 + 描边，让当前页一眼看出来。 */
+    /** 底部导航选中指示器：主题色渐变 + 顶部高光 + 亮描边，做出一点“液态玻璃”的观感。 */
     public static GradientDrawable navPill(Context ctx, boolean active) {
         GradientDrawable d = new GradientDrawable();
         if (active) {
             d.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM);
-            d.setColors(new int[]{0x595B8CFF, 0x3D8A6BFF});
-            d.setStroke(dp(ctx, 1), 0x66A9C2FF);
+            d.setColors(new int[]{0x73A8C4FF, 0x4D7B6BFF});
+            d.setStroke(dp(ctx, 1), 0x8CC7D8FF);
         } else {
             d.setColor(0x00000000);
         }
-        d.setCornerRadius(dp(ctx, 18));
+        d.setCornerRadius(dp(ctx, 20));
         return d;
     }
 }
