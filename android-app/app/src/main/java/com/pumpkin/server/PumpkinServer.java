@@ -188,16 +188,67 @@ public final class PumpkinServer {
         process = null;
     }
 
+    /**
+     * 未收完整的 ANSI 序列会暂存在这里，等下一个数据块拼上再处理。
+     * （进程输出是按块读的，转义序列有可能正好被切在块边界上。）
+     */
+    private final StringBuilder pendingAnsi = new StringBuilder();
+
+    /**
+     * 剥掉服务端输出里的 ANSI 转义序列。
+     *
+     * Pumpkin 检测到 stdout 不是 TTY 时仍会输出颜色码（`ESC[2m`、`ESC[32m`…），
+     * 这些字节直接塞进 TextView 会显示成「.[2m .[32m INFO .[0m」这类乱码。
+     * 这里在写入日志缓冲前统一清洗，屏幕上看不到控制字符。
+     */
+    private synchronized String stripAnsi(String s) {
+        String text;
+        if (pendingAnsi.length() > 0) {
+            pendingAnsi.append(s);
+            text = pendingAnsi.toString();
+            pendingAnsi.setLength(0);
+        } else {
+            text = s;
+        }
+        if (text.indexOf('\u001B') < 0 && text.indexOf('\u009B') < 0) {
+            return text;
+        }
+        // 结尾若是「半个转义序列」，留到下次：ESC 或 ESC[ / ESC[1;3 这种还没到终结符
+        int keepFrom = text.length();
+        for (int i = text.length() - 1; i >= 0; i--) {
+            char c = text.charAt(i);
+            if (c == '\u001B' || c == '\u009B') {
+                keepFrom = i;
+                break;
+            }
+            // 终结符：@ 到 ~ 之间的字符表示序列已经结束
+            if (c >= '@' && c <= '~') {
+                break;
+            }
+        }
+        if (keepFrom < text.length()) {
+            pendingAnsi.append(text, keepFrom, text.length());
+            text = text.substring(0, keepFrom);
+        }
+        if (text.isEmpty()) {
+            return "";
+        }
+        return text.replaceAll("\u001B\\[[0-9;?]*[ -/]*[@-~]", "")
+                .replaceAll("\u009B[0-9;?]*[ -/]*[@-~]", "")
+                .replace("\u001B", "")
+                .replace("\u009B", "");
+    }
+
     private void appendLine(String s) {
         synchronized (this) {
-            log.append(s).append('\n');
+            log.append(stripAnsi(s)).append('\n');
             trim();
         }
     }
 
     private void append(String s) {
         synchronized (this) {
-            log.append(s);
+            log.append(stripAnsi(s));
             trim();
         }
     }
