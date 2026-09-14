@@ -34,7 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pumpkin.server.MainActivity
+import com.pumpkin.server.ui.PumpkinActions
 import com.pumpkin.server.ui.PumpkinColors
 import com.pumpkin.server.ui.PumpkinUiState
 import top.yukonga.miuix.kmp.basic.Button
@@ -48,12 +48,12 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 运行页。
  *
- * 所有按钮都直接调 MainActivity 上原有的 Java 方法，业务逻辑一行不改。
+ * 所有按钮都通过 PumpkinActions 回调到 Java 侧原有方法，业务逻辑一行不改。
  */
 @Composable
 fun RunPage(
-    activity: MainActivity,
     state: PumpkinUiState,
+    actions: PumpkinActions,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -121,13 +121,13 @@ fun RunPage(
                 Spacer(modifier = Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        onClick = { activity.startServerFromUi() },
+                        onClick = { actions.startServerFromUi() },
                         modifier = Modifier.weight(1f),
                         enabled = !state.running,
                         colors = ButtonDefaults.buttonColorsPrimary(),
                     ) { Text("启动") }
                     Button(
-                        onClick = { activity.stopServerFromUi() },
+                        onClick = { actions.stopServerFromUi() },
                         modifier = Modifier.weight(1f),
                         enabled = state.running,
                     ) { Text("停止") }
@@ -136,18 +136,18 @@ fun RunPage(
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        onClick = { activity.openBatterySettingsFromUi() },
+                        onClick = { actions.openBatterySettingsFromUi() },
                         modifier = Modifier.weight(1f),
                     ) { Text("电池优化") }
                     Button(
-                        onClick = { activity.copyAddressFromUi() },
+                        onClick = { actions.copyAddressFromUi() },
                         modifier = Modifier.weight(1f),
                     ) { Text("复制地址") }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
-                    onClick = { activity.showSwitchDialogFromUi() },
+                    onClick = { actions.showSwitchDialogFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("选择运行版本") }
             }
@@ -206,7 +206,7 @@ fun RunPage(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = { activity.sendCommandFromUi(state.command) },
+                        onClick = { actions.sendCommandFromUi(state.command) },
                         colors = ButtonDefaults.buttonColorsPrimary(),
                     ) { Text("发送") }
                 }

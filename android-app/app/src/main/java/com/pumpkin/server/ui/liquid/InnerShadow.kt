@@ -1,9 +1,9 @@
-﻿// Copyright 2026, compose-miuix-ui contributors
+// Copyright 2026, compose-miuix-ui contributors
 // SPDX-License-Identifier: Apache-2.0
 
 package com.pumpkin.server.ui.liquid
 
-// Adapted from Kyant0/AndroidLiquidGlass 鈥?https://github.com/Kyant0/AndroidLiquidGlass (Apache 2.0).
+// Adapted from Kyant0/AndroidLiquidGlass - https://github.com/Kyant0/AndroidLiquidGlass (Apache 2.0).
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable

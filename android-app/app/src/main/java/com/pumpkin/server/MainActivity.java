@@ -43,8 +43,11 @@ import java.util.List;
 /**
  * 轻壳主界面：底部悬浮玻璃导航栏 + 三个页面（运行 / 更新 / 设置）。
  * 壳本身不含服务端，联网从 Releases 下载、切换、回滚、清理版本。
+ *
+ * 界面已由 Java View 迁移到 Compose（见 ui 包），本类保留全部业务逻辑，
+ * 并实现 {@link com.pumpkin.server.ui.PumpkinActions} 作为 Compose 的动作出口。
  */
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements com.pumpkin.server.ui.PumpkinActions {
 
     private static final int REQ_NOTIFICATIONS = 1;
     private static final int PAGE_RUN = 0;

@@ -19,8 +19,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.pumpkin.server.MainActivity
 import com.pumpkin.server.MirrorOption
+import com.pumpkin.server.ui.PumpkinActions
 import com.pumpkin.server.ui.PumpkinColors
 import com.pumpkin.server.ui.PumpkinUiState
 import top.yukonga.miuix.kmp.basic.Button
@@ -34,8 +34,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** 设置页。 */
 @Composable
 fun SettingsPage(
-    activity: MainActivity,
     state: PumpkinUiState,
+    actions: PumpkinActions,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -67,7 +67,7 @@ fun SettingsPage(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = { activity.showModeDialogFromUi() },
+                    onClick = { actions.showModeDialogFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("切换启动方式") }
             }
@@ -95,7 +95,7 @@ fun SettingsPage(
                 MirrorOption.entries.forEach { opt ->
                     val selectedNow = state.mirror.trim() == opt.prefix
                     Button(
-                        onClick = { activity.applyMirrorFromUi(opt.prefix) },
+                        onClick = { actions.applyMirrorFromUi(opt.prefix) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = if (selectedNow) {
                             ButtonDefaults.buttonColorsPrimary()
@@ -159,7 +159,7 @@ fun SettingsPage(
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
                     onClick = {
-                        activity.saveSourceFromUi(state.apiBase, state.repo, state.mirror)
+                        actions.saveSourceFromUi(state.apiBase, state.repo, state.mirror)
                     },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColorsPrimary(),
@@ -180,17 +180,17 @@ fun SettingsPage(
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        onClick = { activity.clearVersionsFromUi() },
+                        onClick = { actions.clearVersionsFromUi() },
                         modifier = Modifier.weight(1f),
                     ) { Text("清服务端版本") }
                     Button(
-                        onClick = { activity.clearGameDataFromUi() },
+                        onClick = { actions.clearGameDataFromUi() },
                         modifier = Modifier.weight(1f),
                     ) { Text("清游戏数据") }
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
-                    onClick = { activity.clearAllFromUi() },
+                    onClick = { actions.clearAllFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("全部清空") }
             }
@@ -213,17 +213,17 @@ fun SettingsPage(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = { activity.checkShellUpdateFromUi() },
+                    onClick = { actions.checkShellUpdateFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("检查更新") }
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        onClick = { activity.openBatterySettingsFromUi() },
+                        onClick = { actions.openBatterySettingsFromUi() },
                         modifier = Modifier.weight(1f),
                     ) { Text("电池优化设置") }
                     Button(
-                        onClick = { activity.copyWorkDirFromUi() },
+                        onClick = { actions.copyWorkDirFromUi() },
                         modifier = Modifier.weight(1f),
                     ) { Text("数据目录路径") }
                 }

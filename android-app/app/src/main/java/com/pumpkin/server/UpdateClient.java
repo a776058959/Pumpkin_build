@@ -34,13 +34,15 @@ public final class UpdateClient {
     public static final String DEFAULT_API_BASE = "https://api.github.com";
     public static final String DEFAULT_REPO = "a776058959/Pumpkin_build";
 
-    /** 内置的 GitHub 加速前缀，空串表示直连。按顺序尝试。 */
-    private static final String[] BUILTIN_PREFIXES = new String[]{
-            "",
-            "https://ghfast.top/",
-            "https://gh-proxy.com/",
-            "https://ghproxy.net/",
-    };
+    /**
+     * 内置的 GitHub 加速前缀，空串表示直连。按顺序尝试。
+     *
+     * 定义在 {@link MirrorOption} 里，与设置页的「加速源」选项共用同一份清单，
+     * 避免两处各写一份、改一处漏一处（曾经就是硬编码在这里的）。
+     */
+    private static String[] builtinPrefixes() {
+        return MirrorOption.builtinPrefixes();
+    }
 
     /** 一个可下载的服务端版本。 */
     public static final class Release {
@@ -206,7 +208,7 @@ public final class UpdateClient {
         if (userMirror != null && !userMirror.trim().isEmpty()) {
             prefixes.add(userMirror.trim());
         }
-        for (String p : BUILTIN_PREFIXES) {
+        for (String p : builtinPrefixes()) {
             prefixes.add(p);
         }
 

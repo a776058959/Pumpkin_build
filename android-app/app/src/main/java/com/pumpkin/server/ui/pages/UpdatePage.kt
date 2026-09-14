@@ -20,7 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pumpkin.server.MainActivity
+import com.pumpkin.server.ui.PumpkinActions
 import com.pumpkin.server.ui.PumpkinColors
 import com.pumpkin.server.ui.PumpkinUiState
 import top.yukonga.miuix.kmp.basic.Button
@@ -34,8 +34,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** 更新页。 */
 @Composable
 fun UpdatePage(
-    activity: MainActivity,
     state: PumpkinUiState,
+    actions: PumpkinActions,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -88,12 +88,12 @@ fun UpdatePage(
                 Spacer(modifier = Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(
-                        onClick = { activity.doCheckFromUi() },
+                        onClick = { actions.doCheckFromUi() },
                         modifier = Modifier.weight(1f),
                         enabled = state.checkEnabled,
                     ) { Text("检查更新") }
                     Button(
-                        onClick = { activity.showVersionPickerFromUi() },
+                        onClick = { actions.showVersionPickerFromUi() },
                         modifier = Modifier.weight(1f),
                     ) { Text("选择版本") }
                 }
@@ -127,7 +127,7 @@ fun UpdatePage(
 
                 Spacer(modifier = Modifier.height(14.dp))
                 Button(
-                    onClick = { activity.onDownloadButtonClickedFromUi() },
+                    onClick = { actions.onDownloadButtonClickedFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state.installButtonEnabled,
                     colors = ButtonDefaults.buttonColorsPrimary(),
@@ -135,7 +135,7 @@ fun UpdatePage(
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
-                    onClick = { activity.onDeleteTaskClickedFromUi() },
+                    onClick = { actions.onDeleteTaskClickedFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state.deleteTaskEnabled,
                 ) { Text("删除下载任务") }
@@ -174,7 +174,7 @@ fun UpdatePage(
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = { activity.showDeleteDialogFromUi() },
+                    onClick = { actions.showDeleteDialogFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = state.installedTags.isNotEmpty(),
                 ) { Text("删除已安装的版本") }
