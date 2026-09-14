@@ -169,19 +169,13 @@ public class MainActivity extends Activity {
         Window window = getWindow();
         window.setStatusBarColor(Color.TRANSPARENT);
         window.setNavigationBarColor(Color.TRANSPARENT);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false);
-            // 背景是深色，状态栏图标必须用浅色，否则在浅色系统主题的 ROM 上会看不清
-            if (window.getInsetsController() != null) {
-                window.getInsetsController().setSystemBarsAppearance(
-                        0, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
-            }
-        } else {
-            window.getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
-        }
+        // 只用老的 setSystemUiVisibility：本应用 targetSdk=28，这套接口全程有效，
+        // 且比 setDecorFitsSystemWindows / InsetsController 稳得多（新接口曾导致启动即崩）。
+        // 不设 LIGHT_STATUS_BAR，即保持浅色图标，配深色背景。
+        window.getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
     }
 
     /** 把系统栏占用的高度变成内边距，内容不会被状态栏或手势条挡住。 */
@@ -192,14 +186,9 @@ public class MainActivity extends Activity {
                 int top;
                 int bottom;
                 try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
-                        top = bars.top;
-                        bottom = bars.bottom;
-                    } else {
-                        top = insets.getSystemWindowInsetTop();
-                        bottom = insets.getSystemWindowInsetBottom();
-                    }
+                    // 一律使用旧接口，避免引用 API 30 才有的 Insets / WindowInsets.Type
+                    top = insets.getSystemWindowInsetTop();
+                    bottom = insets.getSystemWindowInsetBottom();
                 } catch (Throwable t) {
                     // 任何异常都不要让界面崩掉，退化为无内边距
                     return insets;
