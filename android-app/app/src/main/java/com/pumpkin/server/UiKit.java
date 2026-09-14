@@ -43,10 +43,35 @@ public final class UiKit {
                 ctx.getResources().getDisplayMetrics());
     }
 
-    /** 窗口背景：从上到下的深色渐变，带一点冷调。 */
-    public static GradientDrawable windowBackground() {
-        return new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+    /**
+     * 窗口背景：深色渐变 + 两处彩色光晕。
+     * 光晕很关键——纯色背景被模糊后还是纯色，浮层看起来就像不透明；
+     * 有了明暗和色彩变化，毛玻璃才能"透出东西"。
+     */
+    public static android.graphics.drawable.Drawable windowBackground(Context ctx) {
+        GradientDrawable base = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{BG_TOP, BG_BOTTOM});
+
+        GradientDrawable glowBlue = new GradientDrawable();
+        glowBlue.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        glowBlue.setGradientRadius(dp(ctx, 460));
+        glowBlue.setGradientCenter(0.12f, 0.05f);
+        glowBlue.setColors(new int[]{0x664A6BFF, 0x004A6BFF});
+
+        GradientDrawable glowPurple = new GradientDrawable();
+        glowPurple.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        glowPurple.setGradientRadius(dp(ctx, 420));
+        glowPurple.setGradientCenter(0.92f, 0.72f);
+            glowPurple.setColors(new int[]{0x559B5CF6, 0x009B5CF6});
+
+        GradientDrawable glowTeal = new GradientDrawable();
+        glowTeal.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        glowTeal.setGradientRadius(dp(ctx, 340));
+        glowTeal.setGradientCenter(0.5f, 1.05f);
+        glowTeal.setColors(new int[]{0x3D2DD4BF, 0x002DD4BF});
+
+        return new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{base, glowBlue, glowPurple, glowTeal});
     }
 
     /** 玻璃卡片背景（半透明 + 描边 + 大圆角）。导航栏背后有模糊层，这里可以调得更透。 */

@@ -135,12 +135,12 @@ public class MainActivity extends Activity {
 
     private View buildUi() {
         FrameLayout root = new FrameLayout(this);
-        root.setBackground(UiKit.windowBackground());
+        root.setBackground(UiKit.windowBackground(this));
 
         contentArea = new FrameLayout(this);
-        contentArea.setPadding(0, 0, 0, UiKit.dp(this, 96));
-        // 内容区自己也画一份同样的渐变底：截屏做毛玻璃时才不会是一片透明
-        contentArea.setBackground(UiKit.windowBackground());
+        // 关键：内容区**不设**底部内边距，让内容一直延伸到悬浮导航栏下面。
+        // 否则导航栏背后是一片纯色留白，模糊纯色还是纯色，看着就跟不透明一样。
+        contentArea.setBackground(UiKit.windowBackground(this));
         root.addView(contentArea, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -194,7 +194,9 @@ public class MainActivity extends Activity {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         int pad = UiKit.dp(this, 16);
-        col.setPadding(pad, UiKit.dp(this, 26), pad, UiKit.dp(this, 18));
+        // 底部留出足够空间：内容可以滚到悬浮导航栏下面（这样才有东西可模糊），
+        // 同时最后一项不会被挡住。
+        col.setPadding(pad, UiKit.dp(this, 26), pad, UiKit.dp(this, 112));
         sv.addView(col, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         sv.setTag(col);
@@ -606,8 +608,13 @@ public class MainActivity extends Activity {
         versionInstalled.setText(sb.toString());
 
         String text = server.tailLog();
-        if (!text.contentEquals(logView.getText())) {
-            logView.setText(text);
+        String display = text.isEmpty()
+                ? "（还没有日志）\n\n启动服务器后这里会实时输出。\n"
+                        + "下面的输入框可以直接发控制台命令：list、op 玩家名、save-all、stop"
+                : text;
+        if (!display.contentEquals(logView.getText())) {
+            logView.setTextColor(text.isEmpty() ? UiKit.TEXT_DIM : 0xFFCFD6E4);
+            logView.setText(display);
             logScroll.post(new Runnable() {
                 @Override
                 public void run() {
