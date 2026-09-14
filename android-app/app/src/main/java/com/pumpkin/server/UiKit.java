@@ -239,4 +239,18 @@ public final class UiKit {
         d.setStroke(dp(ctx, 1), (color & 0x00FFFFFF) | 0x66000000);
         return d;
     }
+
+    /** 底部导航选中项的胶囊底：主题色渐变 + 描边，让当前页一眼看出来。 */
+    public static GradientDrawable navPill(Context ctx, boolean active) {
+        GradientDrawable d = new GradientDrawable();
+        if (active) {
+            d.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM);
+            d.setColors(new int[]{0x595B8CFF, 0x3D8A6BFF});
+            d.setStroke(dp(ctx, 1), 0x66A9C2FF);
+        } else {
+            d.setColor(0x00000000);
+        }
+        d.setCornerRadius(dp(ctx, 18));
+        return d;
+    }
 }

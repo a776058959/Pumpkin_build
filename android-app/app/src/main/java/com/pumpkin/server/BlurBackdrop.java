@@ -10,11 +10,12 @@ import android.view.View;
 /**
  * 悬浮栏背后的「毛玻璃」。
  *
- * 把悬浮栏下方的内容区渲染成模糊图层，垫在悬浮栏后面，让悬浮栏能透出背后的内容纹理。
+ * 把悬浮栏下方的内容区渲染成模糊图层，垫在悬浮栏后面，让悬浮栏透出背后的内容纹理。
  *
  * 两条实现路径：
  *   Android 12+：内容录进 RenderNode（GPU 记录，全分辨率）+ RenderEffect 硬件模糊。
- *                这与 miuix-blur 在 Android 上的做法同源，不会因为缩放而糊成马赛克。
+ *                录制被推迟到 BlurBackdropView.onDraw 里执行，与主绘制同帧，
+ *                这样滚动时不会因为「录到尚未画出的状态」而闪烁。
  *   更低版本 ：内容绘制到 1/5 缩小位图，再跑三次盒式模糊近似高斯。
  *
  * 不依赖任何第三方库。
@@ -27,6 +28,8 @@ public final class BlurBackdrop {
     private static final float FALLBACK_RADIUS = 14f;
     /** 硬件路径的模糊半径（真实像素，约 20dp）。 */
     private static final float NODE_RADIUS = 62f;
+    /** 重录节流：太小会浪费 GPU，太大则滚动时模糊跟不上。 */
+    private static final long MIN_INTERVAL_MS = 80;
 
     private final View source;
     private final BlurBackdropView target;
@@ -39,9 +42,15 @@ public final class BlurBackdrop {
     public BlurBackdrop(View source, BlurBackdropView target) {
         this.source = source;
         this.target = target;
+        target.setRecorder(new BlurBackdropView.Recorder() {
+            @Override
+            public void record(RenderNode node, int width, int height) {
+                recordInto(node, width, height);
+            }
+        });
     }
 
-    /** 重新采样并模糊。调用方自行控制频率（当前是每秒刷新 + 200ms 节流）。 */
+    /** 请求刷新（带节流）。滚动回调、页面切换、定时器都可以调它。 */
     public void refresh() {
         int w = target.getWidth();
         int h = target.getHeight();
@@ -49,32 +58,30 @@ public final class BlurBackdrop {
             return;
         }
         long now = System.currentTimeMillis();
-        // 节流：太频繁会浪费 GPU，太稀疏则滚动时模糊会"卡"在旧画面上。
-        // 80ms 约等于 12fps 的模糊更新，滚动时基本跟手。
-        if (now - lastDraw < 80) {
+        if (now - lastDraw < MIN_INTERVAL_MS) {
             return;
         }
         lastDraw = now;
 
+        try {
+            if (target.canUseRenderNode()) {
+                // 不在这里录制：只标脏，真正的录制发生在 onDraw（同一帧内完成）
+                target.markDirty();
+            } else {
+                drawSoftware(w, h);
+            }
+        } catch (Exception ignored) {
+            // 视图正在销毁等情况下跳过这一轮
+        }
+    }
+
+    /** 在 onDraw 期间执行：把源内容录进 RenderNode。 */
+    private void recordInto(RenderNode node, int w, int h) {
         source.getLocationInWindow(sourceLoc);
         target.getLocationInWindow(targetLoc);
         int offsetX = targetLoc[0] - sourceLoc[0];
         int offsetY = targetLoc[1] - sourceLoc[1];
 
-        try {
-            if (target.canUseRenderNode()) {
-                drawHardware(w, h, offsetX, offsetY);
-            } else {
-                drawSoftware(w, h, offsetX, offsetY);
-            }
-        } catch (Exception ignored) {
-            // 录制/绘制失败（例如视图正在销毁）时跳过这一轮
-        }
-    }
-
-    /** 硬件路径：RenderNode 记录内容 + GPU 模糊。 */
-    private void drawHardware(int w, int h, int offsetX, int offsetY) {
-        RenderNode node = target.renderNode();
         node.setPosition(0, 0, w, h);
         if (!target.isEffectApplied()) {
             node.setRenderEffect(RenderEffect.createBlurEffect(
@@ -85,11 +92,15 @@ public final class BlurBackdrop {
         canvas.translate(-offsetX, -offsetY);
         source.draw(canvas);
         node.endRecording();
-        target.invalidate();
     }
 
-    /** 软件回退路径：缩小位图 + 盒式模糊。 */
-    private void drawSoftware(int w, int h, int offsetX, int offsetY) {
+    /** 软件回退路径：缩小位图 + 盒式模糊（位图是静态的，不需要同帧约束）。 */
+    private void drawSoftware(int w, int h) {
+        source.getLocationInWindow(sourceLoc);
+        target.getLocationInWindow(targetLoc);
+        int offsetX = targetLoc[0] - sourceLoc[0];
+        int offsetY = targetLoc[1] - sourceLoc[1];
+
         int sw = Math.max(1, w / DOWNSCALE);
         int sh = Math.max(1, h / DOWNSCALE);
         if (bitmap == null || bitmap.getWidth() != sw || bitmap.getHeight() != sh) {

@@ -55,6 +55,7 @@ public class MainActivity extends Activity {
     private View pageSettings;
     private final TextView[] tabIcons = new TextView[3];
     private final TextView[] tabLabels = new TextView[3];
+    private final LinearLayout[] tabViews = new LinearLayout[3];
     private FrameLayout contentArea;
     private BlurBackdropView navBlur;
     private BlurBackdrop backdrop;
@@ -519,21 +520,29 @@ public class MainActivity extends Activity {
 
         String[] icons = new String[]{"▶", "⤓", "⚙"};
         String[] labels = new String[]{"运行", "更新", "设置"};
+        int px = UiKit.dp(this, 5);
+        int py = UiKit.dp(this, 7);
         for (int i = 0; i < 3; i++) {
             final int index = i;
+            // 外层负责等分宽度并留出左右空隙，内层才是带胶囊背景的「选中块」，
+            // 这样选中态是一块明显的小胶囊，而不是整条 1/3 宽的色带。
             LinearLayout tab = new LinearLayout(this);
-            tab.setOrientation(LinearLayout.VERTICAL);
-            tab.setGravity(Gravity.CENTER);
-            tab.setPadding(0, UiKit.dp(this, 6), 0, UiKit.dp(this, 6));
+            tab.setPadding(px, py, px, py);
+
+            LinearLayout inner = new LinearLayout(this);
+            inner.setOrientation(LinearLayout.VERTICAL);
+            inner.setGravity(Gravity.CENTER);
+            int ip = UiKit.dp(this, 8);
+            inner.setPadding(ip, UiKit.dp(this, 8), ip, UiKit.dp(this, 8));
+            tab.addView(inner, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
             TextView icon = new TextView(this);
             icon.setText(icons[i]);
             icon.setTextSize(18);
             icon.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            icon.setLayoutParams(ilp);
-            tab.addView(icon);
+            inner.addView(icon, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
             TextView label = new TextView(this);
             label.setText(labels[i]);
@@ -542,11 +551,11 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             tlp.topMargin = UiKit.dp(this, 3);
-            label.setLayoutParams(tlp);
-            tab.addView(label);
+            inner.addView(label, tlp);
 
             tabIcons[i] = icon;
             tabLabels[i] = label;
+            tabViews[i] = inner;
 
             tab.setOnClickListener(v -> switchPage(index));
             LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0,
@@ -562,9 +571,24 @@ public class MainActivity extends Activity {
         pageSettings.setVisibility(index == PAGE_SETTINGS ? View.VISIBLE : View.GONE);
         for (int i = 0; i < 3; i++) {
             boolean active = (i == index);
-            tabIcons[i].setTextColor(active ? UiKit.ACCENT : UiKit.TEXT_DIM);
-            tabLabels[i].setTextColor(active ? UiKit.ACCENT : UiKit.TEXT_DIM);
+            // 选中项：主题色胶囊底 + 白色图标文字 + 轻微放大；未选中：暗色、缩小一点。
+            tabIcons[i].setTextColor(active ? Color.WHITE : UiKit.TEXT_DIM);
+            tabLabels[i].setTextColor(active ? Color.WHITE : UiKit.TEXT_DIM);
             tabLabels[i].setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            if (tabViews[i] != null) {
+                tabViews[i].setBackground(UiKit.navPill(this, active));
+                tabViews[i].setElevation(active ? UiKit.dp(this, 4) : 0);
+                tabViews[i].animate()
+                        .scaleX(active ? 1f : 0.94f)
+                        .scaleY(active ? 1f : 0.94f)
+                        .setDuration(150)
+                        .start();
+            }
+            tabIcons[i].animate()
+                    .scaleX(active ? 1.15f : 1f)
+                    .scaleY(active ? 1.15f : 1f)
+                    .setDuration(150)
+                    .start();
         }
         if (index == PAGE_RUN) {
             refresh();
