@@ -386,6 +386,13 @@ jobs:
     if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
     runs-on: ubuntu-latest
     steps:
+      # 取出仓库里的维护脚本
+      - name: Checkout (maintenance scripts)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       # 下载所有构建产物
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -468,21 +475,14 @@ jobs:
           allowUpdates: false
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 清理旧的 Release 和 Git tag（保留最近 10 个）
-      - name: Clean up old releases and tags
+      # 按时间窗口清理旧 Release：
+      #   不到 1 个月全留 / 1-2 个月每周留一个 / 2-12 个月每月留一个 / 超 1 年删除
+      - name: Prune old releases
         if: success()
-        run: |
-          KEEP=10
-          echo "🧹 开始清理旧 Release 和对应的 Git tag，保留最近 ${KEEP} 个..."
-          # 使用 gh 命令获取所有 Release 的 tag 名称，按默认顺序（最新在前），取第 11 个及以后的 tag 进行删除
-          gh release list --limit 100 --json tagName --jq ".[${KEEP}:].tagName" | while read tag; do
-            echo "🗑️ 删除 Release: $tag （同时删除对应的 Git tag）"
-            gh release delete "$tag" --yes --cleanup-tag
-          done
-          echo "✅ 清理完成。"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: a776058959/Pumpkin_build
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: a776058959/Pumpkin_build
+        run: bash .github/scripts/prune-releases.sh
 
   # 构建成功后，把「这次构建基于上游哪个提交」写进 .github/upstream-lock.txt。
   # 这就是下次定时检查判断「有没有变化」的唯一依据——不需要同步上游代码本身。
