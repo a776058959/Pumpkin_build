@@ -24,7 +24,6 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -57,7 +56,7 @@ public class MainActivity extends Activity {
     private final TextView[] tabIcons = new TextView[3];
     private final TextView[] tabLabels = new TextView[3];
     private FrameLayout contentArea;
-    private ImageView navBlur;
+    private BlurBackdropView navBlur;
     private BlurBackdrop backdrop;
 
     // 运行页
@@ -154,8 +153,7 @@ public class MainActivity extends Activity {
         // 毛玻璃层：与导航栏同位置同尺寸，显示「导航栏背后的模糊内容」。
         // 注意：没有图片的 ImageView 高度是 0，必须先给一个高度，等导航栏测量完再同步真实高度，
         // 否则 BlurBackdrop 会因为取不到尺寸而永远不绘制。
-        navBlur = new ImageView(this);
-        navBlur.setScaleType(ImageView.ScaleType.FIT_XY);
+        navBlur = new BlurBackdropView(this);
         FrameLayout.LayoutParams blurParams = navParams();
         blurParams.height = UiKit.dp(this, 76);
         root.addView(navBlur, blurParams);

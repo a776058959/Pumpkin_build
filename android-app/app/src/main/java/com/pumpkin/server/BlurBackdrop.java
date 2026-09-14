@@ -3,50 +3,45 @@ package com.pumpkin.server;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.RenderEffect;
+import android.graphics.RenderNode;
 import android.graphics.Shader;
-import android.os.Build;
 import android.view.View;
-import android.widget.ImageView;
 
 /**
  * 悬浮栏背后的「毛玻璃」。
  *
- * 思路：把悬浮栏下方的内容区绘制成一张缩小位图 → 模糊 → 作为悬浮栏的背景图，
- * 于是悬浮栏就能「透出」它背后的内容（真正的背景模糊，而不是单纯半透明）。
+ * 把悬浮栏下方的内容区渲染成模糊图层，垫在悬浮栏后面，让悬浮栏能透出背后的内容纹理。
  *
- * 模糊实现分两条路：
- *   Android 12+ (API 31)：用硬件 RenderEffect 模糊 ImageView 自身内容，开销极低；
- *   更低版本：在缩小后的位图上跑三次盒式模糊近似高斯，小图下也很快。
+ * 两条实现路径：
+ *   Android 12+：内容录进 RenderNode（GPU 记录，全分辨率）+ RenderEffect 硬件模糊。
+ *                这与 miuix-blur 在 Android 上的做法同源，不会因为缩放而糊成马赛克。
+ *   更低版本 ：内容绘制到 1/5 缩小位图，再跑三次盒式模糊近似高斯。
  *
  * 不依赖任何第三方库。
  */
 public final class BlurBackdrop {
 
-    /** 缩小倍数：越大越快越糊。 */
+    /** 软件回退路径的缩小倍数。 */
     private static final int DOWNSCALE = 5;
-    /** 模糊半径（缩小图上的像素）。 */
-    private static final float BLUR_RADIUS = 14f;
+    /** 软件回退路径在缩小图上的模糊半径。 */
+    private static final float FALLBACK_RADIUS = 14f;
+    /** 硬件路径的模糊半径（真实像素，约 20dp）。 */
+    private static final float NODE_RADIUS = 62f;
 
     private final View source;
-    private final ImageView target;
-    private final boolean hardwareBlur;
+    private final BlurBackdropView target;
+    private final int[] sourceLoc = new int[2];
+    private final int[] targetLoc = new int[2];
 
     private Bitmap bitmap;
-    private int[] sourceLoc = new int[2];
-    private int[] targetLoc = new int[2];
     private long lastDraw;
 
-    public BlurBackdrop(View source, ImageView target) {
+    public BlurBackdrop(View source, BlurBackdropView target) {
         this.source = source;
         this.target = target;
-        this.hardwareBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S;
-        if (hardwareBlur) {
-            target.setRenderEffect(
-                    RenderEffect.createBlurEffect(BLUR_RADIUS, BLUR_RADIUS, Shader.TileMode.CLAMP));
-        }
     }
 
-    /** 重新采样并模糊。调用方自行控制频率（例如每 1~2 秒或页面切换时）。 */
+    /** 重新采样并模糊。调用方自行控制频率（当前是每秒刷新 + 200ms 节流）。 */
     public void refresh() {
         int w = target.getWidth();
         int h = target.getHeight();
@@ -54,8 +49,8 @@ public final class BlurBackdrop {
             return;
         }
         long now = System.currentTimeMillis();
-        if (now - lastDraw < 220) {
-            return; // 节流，避免每帧截屏
+        if (now - lastDraw < 200) {
+            return;
         }
         lastDraw = now;
 
@@ -64,41 +59,60 @@ public final class BlurBackdrop {
         int offsetX = targetLoc[0] - sourceLoc[0];
         int offsetY = targetLoc[1] - sourceLoc[1];
 
-        int sw = Math.max(1, w / DOWNSCALE);
-        int sh = Math.max(1, h / DOWNSCALE);
-
         try {
-            if (bitmap == null || bitmap.getWidth() != sw || bitmap.getHeight() != sh) {
-                if (bitmap != null) {
-                    bitmap.recycle();
-                }
-                bitmap = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
+            if (target.canUseRenderNode()) {
+                drawHardware(w, h, offsetX, offsetY);
+            } else {
+                drawSoftware(w, h, offsetX, offsetY);
             }
-            Canvas canvas = new Canvas(bitmap);
-            canvas.drawColor(0x00000000);
-            canvas.scale(1f / DOWNSCALE, 1f / DOWNSCALE);
-            canvas.translate(-offsetX, -offsetY);
-            source.draw(canvas);
-
-            if (!hardwareBlur) {
-                boxBlur(bitmap, Math.round(BLUR_RADIUS / 2f), 3);
-            }
-            target.setImageBitmap(bitmap);
-            target.invalidate();
         } catch (Exception ignored) {
-            // 截屏失败（例如视图正在销毁）时静默跳过，下一轮再试
+            // 录制/绘制失败（例如视图正在销毁）时跳过这一轮
         }
     }
 
+    /** 硬件路径：RenderNode 记录内容 + GPU 模糊。 */
+    private void drawHardware(int w, int h, int offsetX, int offsetY) {
+        RenderNode node = target.renderNode();
+        node.setPosition(0, 0, w, h);
+        if (!target.isEffectApplied()) {
+            node.setRenderEffect(RenderEffect.createBlurEffect(
+                    NODE_RADIUS, NODE_RADIUS, Shader.TileMode.CLAMP));
+            target.markEffectApplied();
+        }
+        Canvas canvas = node.beginRecording();
+        canvas.translate(-offsetX, -offsetY);
+        source.draw(canvas);
+        node.endRecording();
+        target.invalidate();
+    }
+
+    /** 软件回退路径：缩小位图 + 盒式模糊。 */
+    private void drawSoftware(int w, int h, int offsetX, int offsetY) {
+        int sw = Math.max(1, w / DOWNSCALE);
+        int sh = Math.max(1, h / DOWNSCALE);
+        if (bitmap == null || bitmap.getWidth() != sw || bitmap.getHeight() != sh) {
+            if (bitmap != null) {
+                bitmap.recycle();
+            }
+            bitmap = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
+        }
+        Canvas canvas = new Canvas(bitmap);
+        canvas.drawColor(0x00000000);
+        canvas.scale(1f / DOWNSCALE, 1f / DOWNSCALE);
+        canvas.translate(-offsetX, -offsetY);
+        source.draw(canvas);
+        boxBlur(bitmap, Math.round(FALLBACK_RADIUS / 2f), 3);
+        target.setFallbackBitmap(bitmap);
+    }
+
     public void release() {
-        target.setImageBitmap(null);
         if (bitmap != null) {
             bitmap.recycle();
             bitmap = null;
         }
     }
 
-    /** 三次盒式模糊近似高斯：对缩小后的图来说开销很小。 */
+    /** 三次盒式模糊近似高斯：只用于低版本的缩小图，开销很小。 */
     private static void boxBlur(Bitmap bmp, int radius, int rounds) {
         if (radius < 1) {
             return;
@@ -108,7 +122,6 @@ public final class BlurBackdrop {
         int[] src = new int[w * h];
         bmp.getPixels(src, 0, w, 0, 0, w, h);
         int[] tmp = new int[w * h];
-
         for (int r = 0; r < rounds; r++) {
             blurHorizontal(src, tmp, w, h, radius);
             blurVertical(tmp, src, w, h, radius);
