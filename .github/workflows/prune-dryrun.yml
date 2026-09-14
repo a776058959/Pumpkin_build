@@ -1,0 +1,24 @@
+name: Prune releases (dry run)
+
+# 手动检查保留策略会删掉哪些 Release：只打印，不执行删除。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dryrun:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Dry-run prune
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: "1"
+        run: bash .github/scripts/prune-releases.sh
