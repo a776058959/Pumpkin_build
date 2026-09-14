@@ -68,6 +68,9 @@ public class MainActivity extends Activity {
     private FrameLayout contentArea;
     private BlurBackdropView navBlur;
     private BlurBackdrop backdrop;
+    /** 悬浮栏的液态玻璃背景：接收倾斜数据让高光流动。 */
+    private GlassPanelDrawable navGlass;
+    private TiltGlow tiltGlow;
 
     // 运行页
     private TextView statusDot;
@@ -214,12 +217,27 @@ public class MainActivity extends Activity {
         super.onResume();
         ui.removeCallbacks(ticker);
         ui.post(ticker);
+        // 液态玻璃的高光随倾斜流动：回到前台才开传感器，退后台立刻注销
+        if (tiltGlow == null && navGlass != null) {
+            tiltGlow = TiltGlow.start(this, new TiltGlow.Listener() {
+                @Override
+                public void onTilt(float x, float y) {
+                    if (navGlass != null) {
+                        navGlass.setTilt(x, y);
+                    }
+                }
+            });
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         ui.removeCallbacks(ticker);
+        if (tiltGlow != null) {
+            tiltGlow.stop();
+            tiltGlow = null;
+        }
     }
 
     @Override
@@ -646,7 +664,8 @@ public class MainActivity extends Activity {
 
     private View buildBottomNav() {
         FrameLayout nav = new FrameLayout(this);
-        nav.setBackground(UiKit.glass(this, true));
+        navGlass = UiKit.glassPanel(this, true, true);
+        nav.setBackground(navGlass);
         nav.setElevation(UiKit.dp(this, 10));
 
         // 选中指示器：垫在三个 tab 下面，切换页面时平滑滑过去（而不是瞬间跳）

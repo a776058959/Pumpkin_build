@@ -13,8 +13,8 @@ android {
         // 该域允许对应用私有目录里的文件 execve；>= 29 会被 SELinux 拒绝，
         // 那样就无法运行「在线下载」的服务端二进制。
         targetSdk = 28
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
     }
 
     packaging {

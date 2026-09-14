@@ -74,14 +74,29 @@ public final class UiKit {
                 new android.graphics.drawable.Drawable[]{base, glowBlue, glowPurple, glowTeal});
     }
 
-    /** 玻璃卡片背景（半透明 + 描边 + 大圆角）。导航栏背后有模糊层，这里可以调得更透。 */
-    public static GradientDrawable glass(Context ctx, boolean strong) {
-        GradientDrawable d = new GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{strong ? 0x1CFFFFFF : 0x12FFFFFF, strong ? 0x0AFFFFFF : 0x08FFFFFF});
-        d.setCornerRadius(dp(ctx, 26));
-        d.setStroke(dp(ctx, 1), strong ? 0x40FFFFFF : STROKE);
-        return d;
+    /**
+     * 玻璃卡片背景（液态玻璃版）：半透明底 + 顶部光泽 + 底部反光 + 上亮下暗渐变描边。
+     * 配色与旧版 GradientDrawable 一致，只是多了「玻璃高光」层。
+     */
+    public static android.graphics.drawable.Drawable glass(Context ctx, boolean strong) {
+        return glassPanel(ctx, strong, false);
+    }
+
+    /**
+     * 全量「液态玻璃」面板。
+     * dynamic=true 时额外接收 TiltGlow 的倾斜数据，高光随手机倾斜流动（导航栏用）。
+     */
+    public static GlassPanelDrawable glassPanel(Context ctx, boolean strong, boolean dynamic) {
+        return new GlassPanelDrawable(
+                dp(ctx, 26), dp(ctx, 1.5f),
+                strong ? 0x1CFFFFFF : 0x12FFFFFF,   // 填充顶
+                strong ? 0x0AFFFFFF : 0x08FFFFFF,   // 填充底
+                strong ? 0x99FFFFFF : 0x70FFFFFF,   // 描边顶（亮，边缘折射感）
+                strong ? 0x30FFFFFF : 0x22FFFFFF,   // 描边底（暗）
+                strong ? 0x33EAF6FF : 0x24FFFFFF,   // 顶部光泽（微微偏青，玻璃感）
+                strong ? 0x26FFFFFF : 0x1AFFFFFF,   // 底部反光（光从底部包上来）
+                dynamic ? 0x2EFFFFFF : 0x00000000,  // 倾斜光斑
+                dynamic);
     }
 
     /** 主按钮背景。 */
@@ -240,17 +255,19 @@ public final class UiKit {
         return d;
     }
 
-    /** 底部导航选中指示器：主题色渐变 + 顶部高光 + 亮描边，做出一点“液态玻璃”的观感。 */
-    public static GradientDrawable navPill(Context ctx, boolean active) {
-        GradientDrawable d = new GradientDrawable();
-        if (active) {
-            d.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM);
-            d.setColors(new int[]{0x73A8C4FF, 0x4D7B6BFF});
-            d.setStroke(dp(ctx, 1), 0x8CC7D8FF);
-        } else {
+    /** 底部导航选中指示器：主题色玻璃胶囊 —— 顶部光泽 + 青色渐变描边 + 底部反光。 */
+    public static android.graphics.drawable.Drawable navPill(Context ctx, boolean active) {
+        if (!active) {
+            GradientDrawable d = new GradientDrawable();
             d.setColor(0x00000000);
+            d.setCornerRadius(dp(ctx, 20));
+            return d;
         }
-        d.setCornerRadius(dp(ctx, 20));
-        return d;
+        return new GlassPanelDrawable(
+                dp(ctx, 20), dp(ctx, 1.2f),
+                0x73A8C4FF, 0x4D7B6BFF,   // 主题色填充（与旧版一致）
+                0xCCD6E8FF, 0x4DC7D8FF,   // 青色描边渐变
+                0x38FFFFFF, 0x1EB8E6FF,   // 顶部白光泽 / 底部青色反光
+                0x00000000, false);
     }
 }
