@@ -1,0 +1,534 @@
+name: Build Pumpkin (upstream pulled at build time)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '即使上游没有新提交也强制构建'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 */2 * * *'   # 每 2 小时检查一次；只有上游有新提交时才真正构建
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # 强制使用 Node.js 24，消除弃用警告
+
+permissions: write-all
+
+jobs:
+  # 只检查上游有没有新提交：比较 commit SHA，不把上游代码同步/合并进本仓库
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.cmp.outputs.sha }}
+      short: ${{ steps.cmp.outputs.short }}
+      changed: ${{ steps.cmp.outputs.changed }}
+      commits_base64: ${{ steps.cmp.outputs.commits_base64 }}
+    steps:
+      - name: Checkout own repo (for the upstream lock file)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compare upstream HEAD with last built commit
+        id: cmp
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA=$(git ls-remote https://github.com/Pumpkin-MC/Pumpkin.git refs/heads/master | cut -f1)
+          if [ -z "$SHA" ]; then echo "❌ 读取上游 HEAD 失败"; exit 1; fi
+          if [ -f .github/upstream-lock.txt ]; then
+            LOCKED=$(tr -d '[:space:]' < .github/upstream-lock.txt)
+          else
+            LOCKED=""
+          fi
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "short=${SHA:0:8}" >> $GITHUB_OUTPUT
+          echo "上游当前 HEAD: $SHA"
+          echo "上次构建的提交: ${LOCKED:-（无记录，将执行首次构建）}"
+          if [ "$SHA" = "$LOCKED" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "commits_base64=" >> $GITHUB_OUTPUT
+            echo "✅ 上游没有新提交，跳过构建"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "🚀 上游有新提交，准备构建"
+            if [ -n "$LOCKED" ]; then
+              COMMITS=$(gh api "repos/Pumpkin-MC/Pumpkin/compare/$LOCKED...$SHA" \
+                --jq '.commits[] | "- \(.commit.message | split("\n")[0]) (\(.sha[0:7]))"' 2>/dev/null | head -60 || true)
+            else
+              COMMITS="（首次构建，无对比基线）"
+            fi
+            if [ -z "$COMMITS" ]; then COMMITS="（未能获取提交列表）"; fi
+            echo "📝 新增提交："
+            echo "$COMMITS"
+            echo "commits_base64=$(printf '%s' "$COMMITS" | base64 -w0)" >> $GITHUB_OUTPUT
+          fi
+
+  # 编译（仅当上游有新提交时运行，代码直接来自上游仓库）
+  build:
+    needs: check
+    if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.continue-on-error }}
+    strategy:
+      matrix:
+        include:
+          # Linux x86_64 标准构建
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x86_64
+            rustflags: ""
+            linker: ""
+            pkgs: ""
+            continue-on-error: false
+
+          # Linux x86_64 旧 CPU 优化构建
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-x86_64-legacy
+            rustflags: "-C target-cpu=core2"
+            linker: ""
+            pkgs: ""
+            continue-on-error: false
+
+          # Linux ARM64 构建（实验性，允许失败）
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            suffix: linux-aarch64
+            rustflags: ""
+            linker: "aarch64-linux-gnu-gcc"
+            pkgs: "gcc-aarch64-linux-gnu"
+            continue-on-error: true
+
+          # Linux LoongArch64 构建（实验性，允许失败）
+          - os: ubuntu-latest
+            target: loongarch64-unknown-linux-gnu
+            suffix: linux-loongarch64
+            rustflags: ""
+            linker: "loongarch64-unknown-linux-gnu-gcc"
+            pkgs: ""
+            continue-on-error: true
+
+          # Windows x86_64 标准构建（实验性，允许失败）
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-x86_64
+            rustflags: ""
+            linker: ""
+            pkgs: ""
+            continue-on-error: true
+
+          # Windows x86_64 旧 CPU 优化构建（实验性，允许失败）
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-x86_64-legacy
+            rustflags: "-C target-cpu=core2"
+            linker: ""
+            pkgs: ""
+            continue-on-error: true
+
+          # Windows ARM64 构建（实验性，允许失败）
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            suffix: windows-arm64
+            rustflags: ""
+            linker: ""
+            pkgs: ""
+            continue-on-error: true
+
+    steps:
+      # 只检出本仓库（上游源码在下一步单独拉，不再往本仓库同步）
+      - name: Checkout own repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 按 check job 确定的提交，拉取上游源码到 src/ 目录
+      - name: Fetch upstream source at pinned commit
+        shell: bash
+        run: |
+          git init -q src
+          cd src
+          git remote add origin https://github.com/Pumpkin-MC/Pumpkin.git
+          git fetch -q --depth=1 origin "${{ needs.check.outputs.sha }}"
+          git checkout -q FETCH_HEAD
+          echo "📦 上游提交: $(git log -1 --format='%h %s')"
+
+      # 设置日期（使用 Bash 以确保跨平台兼容）
+      - name: Set build date and time
+        id: datetime
+        shell: bash
+        run: |
+          UTC_DATE=$(date -u +'%Y%m%d')
+          UTC_TIME=$(date -u +'%H%M')
+          BEIJING_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M')
+          echo "utc_date=$UTC_DATE" >> $GITHUB_OUTPUT
+          echo "utc_time=$UTC_TIME" >> $GITHUB_OUTPUT
+          echo "beijing=$BEIJING_TIME" >> $GITHUB_OUTPUT
+
+      # 安装交叉编译工具（仅 Linux 需要）
+      - name: Install cross compilation tools (Linux only)
+        if: runner.os == 'Linux' && matrix.pkgs != ''
+        run: |
+          sudo apt update
+          sudo apt install -y ${{ matrix.pkgs }}
+
+      # 下载并解压 LoongArch 工具链（仅 Linux 需要）
+      - name: Download and extract LoongArch toolchain (Linux only)
+        if: runner.os == 'Linux' && matrix.target == 'loongarch64-unknown-linux-gnu'
+        run: |
+          DOWNLOAD_URL="https://github.com/loongson/build-tools/releases/download/2025.08.08/x86_64-cross-tools-loongarch64-binutils_2.45-gcc_15.1.0-glibc_2.42.tar.xz"
+          FILENAME="loongarch64-toolchain.tar.xz"
+          TOOLCHAIN_DIR="/opt/loongarch64-toolchain"
+          echo "⬇️ 下载 LoongArch 工具链..."
+          wget -q --show-progress $DOWNLOAD_URL -O $FILENAME
+          echo "📦 解压工具链到 $TOOLCHAIN_DIR ..."
+          sudo mkdir -p $TOOLCHAIN_DIR
+          sudo tar -xf $FILENAME -C $TOOLCHAIN_DIR --strip-components=0
+          if [ -d "$TOOLCHAIN_DIR/bin" ]; then
+            BIN_DIR="$TOOLCHAIN_DIR/bin"
+          elif [ -d "$TOOLCHAIN_DIR/cross-tools/bin" ]; then
+            BIN_DIR="$TOOLCHAIN_DIR/cross-tools/bin"
+          else
+            echo "❌ 未找到 bin 目录"
+            exit 1
+          fi
+          echo "BIN_DIR=$BIN_DIR" >> $GITHUB_ENV
+          echo "$BIN_DIR" >> $GITHUB_PATH
+          echo "✅ LoongArch 工具链已安装，bin 目录为 $BIN_DIR"
+          ls -l $BIN_DIR | head -20
+          COMPILER_NAME="loongarch64-unknown-linux-gnu-gcc"
+          if [ -f "$BIN_DIR/$COMPILER_NAME" ]; then
+            $BIN_DIR/$COMPILER_NAME --version
+          else
+            echo "⚠️ 未找到编译器 $COMPILER_NAME"
+          fi
+
+      # 安装 Rust
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # 配置链接器（仅 Linux 需要）
+      - name: Configure linker (Linux only)
+        if: runner.os == 'Linux' && matrix.linker != ''
+        run: |
+          mkdir -p ~/.cargo
+          if [ "${{ matrix.target }}" == "loongarch64-unknown-linux-gnu" ]; then
+            LINKER_PATH="$BIN_DIR/${{ matrix.linker }}"
+          else
+            LINKER_PATH="${{ matrix.linker }}"
+          fi
+          echo "[target.${{ matrix.target }}]" >> ~/.cargo/config.toml
+          echo "linker = \"$LINKER_PATH\"" >> ~/.cargo/config.toml
+
+      # 使用 Bash 运行 cargo 命令，确保环境变量 RUSTFLAGS 正确传递
+      - name: Build
+        shell: bash
+        working-directory: src
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # 上传构建产物
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumpkin-server-${{ matrix.suffix }}-${{ steps.datetime.outputs.utc_date }}
+          path: src/target/${{ matrix.target }}/release/pumpkin${{ runner.os == 'Windows' && '.exe' || '' }}
+
+  # Android ARM64 构建（aarch64-linux-android，Termux 可运行），实验性允许失败。
+  build-android:
+    needs: check
+    if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      ANDROID_API: "24"
+
+    steps:
+      # 只检出本仓库（上游源码在下一步单独拉，不再往本仓库同步）
+      - name: Checkout own repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 按 check job 确定的提交，拉取上游源码到 src/ 目录
+      - name: Fetch upstream source at pinned commit
+        shell: bash
+        run: |
+          git init -q src
+          cd src
+          git remote add origin https://github.com/Pumpkin-MC/Pumpkin.git
+          git fetch -q --depth=1 origin "${{ needs.check.outputs.sha }}"
+          git checkout -q FETCH_HEAD
+          echo "📦 上游提交: $(git log -1 --format='%h %s')"
+
+      - name: Set build date
+        id: datetime
+        shell: bash
+        run: echo "utc_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      # 安装 Rust（含 Android 目标）
+      - name: Install Rust (Android target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      # 定位 runner 预装的 Android NDK
+      - name: Locate Android NDK
+        id: ndk
+        shell: bash
+        run: |
+          NDK=""
+          for d in "$ANDROID_NDK_LATEST_HOME" "$ANDROID_NDK_HOME" "$ANDROID_NDK_ROOT" /usr/local/android/sdk/ndk/*; do
+            if [ -n "$d" ] && [ -d "$d/toolchains/llvm/prebuilt/linux-x86_64/bin" ]; then NDK="$d"; break; fi
+          done
+          if [ -z "$NDK" ]; then echo "❌ 未找到 Android NDK"; exit 1; fi
+          echo "ndk=$NDK" >> $GITHUB_OUTPUT
+          echo "✅ 使用 NDK: $NDK"
+          "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version | head -2
+
+      # 交叉编译到 aarch64-linux-android（ring / lz4 等 C 依赖由 NDK clang 编译）
+      - name: Build for Android arm64
+        shell: bash
+        working-directory: src
+        run: |
+          NDK="${{ steps.ndk.outputs.ndk }}"
+          TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          BIN="$TOOLCHAIN/bin"
+          API="$ANDROID_API"
+          CC="$BIN/aarch64-linux-android${API}-clang"
+          export CC_aarch64_linux_android="$CC"
+          export CXX_aarch64_linux_android="${CC}++"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          export RANLIB_aarch64_linux_android="$BIN/llvm-ranlib"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="$BIN/llvm-ar"
+          cargo build --release --target aarch64-linux-android \
+            --config "target.aarch64-linux-android.linker=\"$CC\""
+
+      # 静态校验产物
+      - name: Verify Android binary
+        shell: bash
+        run: |
+          NDK="${{ steps.ndk.outputs.ndk }}"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          F=src/target/aarch64-linux-android/release/pumpkin
+          ls -lh "$F"
+          file "$F" || true
+          "$BIN/llvm-readelf" -h "$F" | head -12 || true
+          "$BIN/llvm-readelf" -d "$F" | grep -E "NEEDED|interpreter" || true
+
+      # 上传构建产物
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumpkin-server-android-arm64-${{ steps.datetime.outputs.utc_date }}
+          path: src/target/aarch64-linux-android/release/pumpkin
+
+  # 把 Android 原生二进制包装成可直接安装的 APK（无需 Termux）
+  build-android-apk:
+    needs: [build-android, check]
+    if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      # APK 外壳源码在 ci 分支（master 是上游同步分支，不含 android-app）
+      - name: Checkout ci branch for APK shell
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set build date
+        id: datetime
+        shell: bash
+        run: echo "utc_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      # 取 build-android 产出的原生二进制
+      - name: Download Android binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pumpkin-server-android-arm64-${{ steps.datetime.outputs.utc_date }}
+          path: apk-input
+
+      # 放进 jniLibs：安装时系统会解压到 nativeLibraryDir，那里允许执行
+      - name: Place binary into jniLibs
+        shell: bash
+        run: |
+          mkdir -p android-app/app/src/main/jniLibs/arm64-v8a
+          cp apk-input/pumpkin android-app/app/src/main/jniLibs/arm64-v8a/libpumpkin.so
+          chmod +x android-app/app/src/main/jniLibs/arm64-v8a/libpumpkin.so
+          ls -l android-app/app/src/main/jniLibs/arm64-v8a/
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        working-directory: android-app
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          mkdir -p apk-out
+          cp android-app/app/build/outputs/apk/debug/app-debug.apk \
+             "apk-out/pumpkin-android-arm64-${{ steps.datetime.outputs.utc_date }}.apk"
+          ls -lh apk-out
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumpkin-android-apk-${{ steps.datetime.outputs.utc_date }}
+          path: apk-out/*.apk
+
+  # 统一发布 Release（仅当有更新时运行）
+  release:
+    needs: [build, build-android, build-android-apk, check]
+    if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # 下载所有构建产物
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # 显示下载的文件结构
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      # 解码上游提交信息
+      - name: Decode upstream commits
+        id: decode_commits
+        run: |
+          ENCODED="${{ needs.check.outputs.commits_base64 }}"
+          if [ -n "$ENCODED" ]; then
+            DECODED=$(echo "$ENCODED" | base64 -d)
+            echo "📌 解码后的提交列表："
+            echo "$DECODED"
+            echo "commits<<EOF" >> $GITHUB_OUTPUT
+            echo "$DECODED" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "commits=" >> $GITHUB_OUTPUT
+          fi
+
+      # 获取构建时间戳
+      - name: Get build timestamp
+        id: timestamp
+        run: |
+          UTC_DATE=$(date -u +'%Y%m%d')
+          UTC_TIME=$(date -u +'%H%M')
+          BEIJING_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M')
+          echo "utc_date=$UTC_DATE" >> $GITHUB_OUTPUT
+          echo "utc_time=$UTC_TIME" >> $GITHUB_OUTPUT
+          echo "beijing=$BEIJING_TIME" >> $GITHUB_OUTPUT
+
+      # 准备 Release 文件
+      - name: Prepare release files
+        run: |
+          mkdir -p release_files
+          for dir in artifacts/pumpkin-server-*; do
+            if [ -f "$dir/pumpkin" ]; then
+              suffix=$(basename "$dir" | sed 's/^pumpkin-server-//')
+              cp "$dir/pumpkin" "release_files/pumpkin-$suffix"
+            elif [ -f "$dir/pumpkin.exe" ]; then
+              suffix=$(basename "$dir" | sed 's/^pumpkin-server-//')
+              cp "$dir/pumpkin.exe" "release_files/pumpkin-$suffix.exe"
+            fi
+          done
+          # Android 安装包（APK）
+          find artifacts -name "*.apk" -exec cp {} release_files/ \;
+          ls -la release_files
+
+      # 创建 Release
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: Custom-${{ steps.timestamp.outputs.utc_date }}-${{ steps.timestamp.outputs.utc_time }}
+          name: Custom Build ${{ steps.timestamp.outputs.utc_date }}-${{ steps.timestamp.outputs.utc_time }}
+          body: |
+            自动构建，上游提交：${{ needs.check.outputs.sha }}
+            构建时间：${{ steps.timestamp.outputs.beijing }} UTC+8
+
+            ----------------------------------------
+            ${{ steps.decode_commits.outputs.commits }}
+            ----------------------------------------
+
+            下载链接（在 Release 附件中）：
+            - `pumpkin-linux-x86_64-${{ steps.timestamp.outputs.utc_date }}` – Linux x86_64 标准构建
+            - `pumpkin-linux-x86_64-legacy-${{ steps.timestamp.outputs.utc_date }}` – Linux x86_64 旧 CPU 优化
+            - `pumpkin-linux-aarch64-${{ steps.timestamp.outputs.utc_date }}` – Linux ARM64 构建
+            - `pumpkin-linux-loongarch64-${{ steps.timestamp.outputs.utc_date }}` – Linux LoongArch64 构建（实验性）
+            - `pumpkin-windows-x86_64-${{ steps.timestamp.outputs.utc_date }}.exe` – Windows x86_64 标准构建
+            - `pumpkin-windows-x86_64-legacy-${{ steps.timestamp.outputs.utc_date }}.exe` – Windows x86_64 旧 CPU 优化
+            - `pumpkin-windows-arm64-${{ steps.timestamp.outputs.utc_date }}.exe` – Windows ARM64 构建（实验性）
+            - `pumpkin-android-arm64-${{ steps.timestamp.outputs.utc_date }}` – Android ARM64 构建（aarch64-linux-android，Termux 可运行，实验性）
+            - `pumpkin-android-arm64-${{ steps.timestamp.outputs.utc_date }}.apk` – Android 安装包（无需 Termux，直接安装使用，实验性）
+          artifacts: "release_files/*"
+          allowUpdates: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 清理旧的 Release 和 Git tag（保留最近 10 个）
+      - name: Clean up old releases and tags
+        if: success()
+        run: |
+          KEEP=10
+          echo "🧹 开始清理旧 Release 和对应的 Git tag，保留最近 ${KEEP} 个..."
+          # 使用 gh 命令获取所有 Release 的 tag 名称，按默认顺序（最新在前），取第 11 个及以后的 tag 进行删除
+          gh release list --limit 100 --json tagName --jq ".[${KEEP}:].tagName" | while read tag; do
+            echo "🗑️ 删除 Release: $tag （同时删除对应的 Git tag）"
+            gh release delete "$tag" --yes --cleanup-tag
+          done
+          echo "✅ 清理完成。"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: a776058959/Pumpkin_build
+
+  # 构建成功后，把「这次构建基于上游哪个提交」写进 .github/upstream-lock.txt。
+  # 这就是下次定时检查判断「有没有变化」的唯一依据——不需要同步上游代码本身。
+  record:
+    needs: [check, build]
+    if: needs.check.outputs.changed == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout own repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update upstream lock file
+        shell: bash
+        env:
+          SHA: ${{ needs.check.outputs.sha }}
+        run: |
+          mkdir -p .github
+          printf '%s\n' "$SHA" > .github/upstream-lock.txt
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add .github/upstream-lock.txt
+          if git diff --cached --quiet; then
+            echo "✅ lock 内容未变化，无需提交"
+          else
+            git commit -m "chore(ci): upstream ${SHA:0:8} built successfully [skip ci]"
+            git push origin HEAD:main
+            echo "✅ 已记录上游提交 ${SHA:0:8}"
+          fi

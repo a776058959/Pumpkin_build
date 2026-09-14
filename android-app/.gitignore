@@ -1,0 +1,6 @@
+.gradle/
+build/
+local.properties
+app/build/
+# 由 CI 在构建时放入，不入库
+app/src/main/jniLibs/
