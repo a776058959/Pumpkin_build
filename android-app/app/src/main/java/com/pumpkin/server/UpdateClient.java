@@ -116,7 +116,12 @@ public final class UpdateClient {
             throw new IOException("该版本没有可下载的 Android 二进制");
         }
         File tmp = new File(ServerPaths.downloadCacheDir(ctx), release.tag.replaceAll("[^A-Za-z0-9._-]", "_") + ".part");
-        HttpURLConnection conn = open(release.binaryUrl);
+        String url = release.binaryUrl;
+        String mirror = Prefs.get(ctx, "download_mirror", "");
+        if (mirror != null && !mirror.trim().isEmpty() && url.startsWith("https://github.com/")) {
+            url = mirror.trim() + url;
+        }
+        HttpURLConnection conn = open(url);
         long total = conn.getContentLength();
         if (total <= 0) {
             total = release.binarySize;

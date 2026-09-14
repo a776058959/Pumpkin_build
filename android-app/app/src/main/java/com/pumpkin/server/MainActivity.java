@@ -183,6 +183,10 @@ public class MainActivity extends Activity {
         verCard.addView(versionHint);
 
         checkBtn = UiKit.button(this, "检查更新", false);
+        checkBtn.setOnLongClickListener(v -> {
+            showSettingsDialog();
+            return true;
+        });
         installBtn = UiKit.button(this, "下载最新版本", true);
         verCard.addView(UiKit.buttonRow(this, checkBtn, installBtn));
 
@@ -368,6 +372,50 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 长按「检查更新」打开：可换 GitHub API 地址与仓库、可设下载镜像前缀。 */
+    private void showSettingsDialog() {
+        float d = getResources().getDisplayMetrics().density;
+        int pad = (int) (20 * d);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad, pad / 2, pad, 0);
+
+        final EditText apiInput = new EditText(this);
+        apiInput.setHint("https://api.github.com");
+        apiInput.setText(UpdateClient.apiBase(this));
+        apiInput.setTextSize(13);
+        box.addView(apiInput);
+
+        final EditText repoInput = new EditText(this);
+        repoInput.setHint("owner/repo");
+        repoInput.setText(UpdateClient.repo(this));
+        repoInput.setTextSize(13);
+        box.addView(repoInput);
+
+        final EditText mirrorInput = new EditText(this);
+        mirrorInput.setHint("下载镜像前缀，可留空");
+        mirrorInput.setText(Prefs.get(this, "download_mirror", ""));
+        mirrorInput.setTextSize(13);
+        box.addView(mirrorInput);
+
+        new AlertDialog.Builder(this)
+                .setTitle("下载源设置")
+                .setMessage("手机直连 GitHub 不通时可改这里。API 地址需返回与 GitHub 相同的 JSON；"
+                        + "下载镜像前缀会拼在 https://github.com/... 前面（例如 https://ghfast.top/）。")
+                .setView(box)
+                .setPositiveButton("保存", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dlg, int w) {
+                        Prefs.put(MainActivity.this, "api_base", apiInput.getText().toString().trim());
+                        Prefs.put(MainActivity.this, "repo", repoInput.getText().toString().trim());
+                        Prefs.put(MainActivity.this, "download_mirror", mirrorInput.getText().toString().trim());
+                        toast("已保存");
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
     private void showModeDialog() {
         final String[] items = new String[]{
                 "普通模式 — App 直接启动（依赖 targetSdk 28 的 SELinux 豁免）",
@@ -476,7 +524,7 @@ public class MainActivity extends Activity {
                             busy = false;
                             checkBtn.setEnabled(true);
                             versionHint.setText("检查失败：" + e.getMessage()
-                                    + "\n若手机访问 GitHub 不通，可在设置里改用镜像地址");
+                                    + "\n提示：长按「检查更新」可设置镜像地址（手机直连 GitHub 不通时用）");
                         }
                     });
                 }
