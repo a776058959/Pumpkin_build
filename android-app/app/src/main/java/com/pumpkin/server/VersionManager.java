@@ -128,6 +128,7 @@ public final class VersionManager {
      * 返回该版本目录。
      */
     public File install(String tag, File downloaded) throws Exception {
+        validateBinary(downloaded);
         File dir = dirFor(tag);
         deleteRecursive(dir);
         if (!dir.mkdirs() && !dir.isDirectory()) {
@@ -183,6 +184,37 @@ public final class VersionManager {
             return "unknown";
         }
         return tag.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    /** 校验下载到的确实是 aarch64-linux-android 可执行文件，避免把错误页面当成服务端装上。 */
+    public static void validateBinary(File f) throws Exception {
+        if (f == null || !f.isFile()) {
+            throw new Exception("下载文件不存在");
+        }
+        long len = f.length();
+        if (len < 1000000L) {
+            throw new Exception("文件只有 " + len + " 字节，不是服务端二进制（可能下载到了错误页面）");
+        }
+        byte[] head = new byte[20];
+        java.io.FileInputStream in = new java.io.FileInputStream(f);
+        try {
+            int read = in.read(head);
+            if (read < 20) {
+                throw new Exception("文件头不完整");
+            }
+        } finally {
+            try {
+                in.close();
+            } catch (Exception ignored) {
+            }
+        }
+        if (head[0] != 0x7F || head[1] != 'E' || head[2] != 'L' || head[3] != 'F') {
+            throw new Exception("不是有效的可执行文件（ELF 校验失败），可能下载到了错误页面");
+        }
+        int machine = (head[18] & 0xFF) | ((head[19] & 0xFF) << 8);
+        if (machine != 0xB7) {
+            throw new Exception("架构不匹配：期望 arm64（0xB7），实际 0x" + Integer.toHexString(machine));
+        }
     }
 
     public static void deleteRecursive(File f) {

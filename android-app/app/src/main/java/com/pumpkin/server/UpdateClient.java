@@ -110,8 +110,31 @@ public final class UpdateClient {
         return out;
     }
 
-    /** 下载到 cache 目录，返回临时文件。 */
+    /** 下载到 cache 目录，返回临时文件；失败会自动重试（最多 3 次）。 */
     public File download(Release release, Progress progress) throws IOException {
+        IOException last = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                return downloadOnce(release, progress);
+            } catch (IOException e) {
+                last = e;
+                if (progress != null && !progress.isRunning()) {
+                    break;
+                }
+                if (attempt < 3) {
+                    try {
+                        Thread.sleep(1500L * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+        throw (last != null) ? last : new IOException("下载失败");
+    }
+
+    private File downloadOnce(Release release, Progress progress) throws IOException {
         if (release == null || release.binaryUrl == null) {
             throw new IOException("该版本没有可下载的 Android 二进制");
         }
