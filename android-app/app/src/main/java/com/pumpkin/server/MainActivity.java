@@ -78,6 +78,7 @@ public class MainActivity extends Activity {
 
     // 设置页
     private TextView modeValue;
+    private TextView diagText;
     private EditText apiInput;
     private EditText repoInput;
     private EditText mirrorInput;
@@ -419,6 +420,8 @@ public class MainActivity extends Activity {
         aboutCard.addView(UiKit.value(this,
                 "壳版本 " + versionName() + "（不含服务端）\n"
                         + "服务端机器 " + UpdateClient.repo(this)));
+        diagText = UiKit.label(this, "");
+        aboutCard.addView(diagText);
         Button battBtn2 = UiKit.button(this, "电池优化设置", false);
         Button dirBtn = UiKit.button(this, "数据目录路径", false);
         aboutCard.addView(UiKit.buttonRow(this, battBtn2, dirBtn));
@@ -584,6 +587,14 @@ public class MainActivity extends Activity {
         boolean rootMode = Prefs.getBool(this, "root_mode", false);
         if (modeValue != null) {
             modeValue.setText(rootMode ? "Root 模式（su，不改 SELinux）" : "普通模式（targetSdk 28 豁免）");
+        }
+        if (diagText != null && navBlur != null) {
+            String path = navBlur.canUseRenderNode() ? "硬件 RenderNode" : "软件 Bitmap";
+            diagText.setText("诊断：API " + Build.VERSION.SDK_INT
+                    + " · 模糊路径 " + path
+                    + (navBlur.isEffectApplied() ? "（已应用）" : "（未应用）")
+                    + "\n模糊层尺寸 " + navBlur.getWidth() + "×" + navBlur.getHeight() + "px"
+                    + " · 内容区 " + (contentArea == null ? "?" : contentArea.getWidth() + "×" + contentArea.getHeight()));
         }
 
         String cur = versions.currentTag();
