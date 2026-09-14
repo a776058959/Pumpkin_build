@@ -13,11 +13,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Enumeration;
 
 /**
- * 持有 Pumpkin 原生进程的状态与输出。
+ * Pumpkin 原生服务端进程的状态与输出。
  *
- * APK 里的 libpumpkin.so 就是交叉编译出来的 aarch64-linux-android 可执行文件，
- * 安装时由系统解压到 nativeLibraryDir，该目录在 Android 10+ 上仍允许执行
- * （app 私有数据目录被 W^X 禁止执行，nativeLibraryDir 是例外）。
+ * 二进制来自 {@link VersionManager}（内部私有目录，targetSdk=28 下可 execve），
+ * 工作目录用 {@link ServerPaths#workDir}（外部目录，方便改配置和放存档）。
  */
 public final class PumpkinServer {
 
@@ -67,32 +66,33 @@ public final class PumpkinServer {
         log.setLength(0);
     }
 
-    /** 启动原生进程。工作目录设为 filesDir，这样 config/ world/ logs/ 都写在可写私有目录里。 */
+    public synchronized void logLine(String s) {
+        appendLine(s);
+    }
+
+    /** 启动当前选中的服务端版本。 */
     public synchronized void start(Context context) {
         if (running) {
             appendLine("[app] 服务器已在运行");
             return;
         }
 
-        File bin = new File(context.getApplicationInfo().nativeLibraryDir, "libpumpkin.so");
-        if (!bin.isFile()) {
-            appendLine("[app] 找不到可执行文件: " + bin.getAbsolutePath());
+        VersionManager vm = new VersionManager(context);
+        File bin = vm.currentBinary();
+        if (bin == null) {
+            appendLine("[app] 还没有安装任何服务端版本");
+            appendLine("[app] 请先在上方「服务端版本」里检查更新并下载");
             return;
         }
+        final String tag = vm.currentTag();
 
-        // 优先用应用专属外部目录：插 USB / 系统文件管理器就能访问 Android/data/<包名>/files，
-        // 方便改配置和放世界存档；不可用时退回内部私有目录。
-        File external = context.getExternalFilesDir(null);
-        workDir = (external != null) ? external : context.getFilesDir();
-        if (workDir == null) {
-            appendLine("[app] 找不到可写目录");
-            return;
-        }
+        workDir = ServerPaths.workDir(context);
         if (!workDir.isDirectory() && !workDir.mkdirs()) {
             appendLine("[app] 无法创建工作目录: " + workDir.getAbsolutePath());
             return;
         }
 
+        appendLine("[app] 版本: " + tag);
         appendLine("[app] 可执行文件: " + bin.getAbsolutePath());
         appendLine("[app] 工作目录: " + workDir.getAbsolutePath());
 
@@ -100,8 +100,6 @@ public final class PumpkinServer {
             ProcessBuilder pb = new ProcessBuilder(bin.getAbsolutePath());
             pb.directory(workDir);
             pb.redirectErrorStream(true);
-            // stdin 保持默认管道：服务端在非 TTY 下逐行读 stdin 当控制台命令，
-            // App 用 sendCommand() 往这个管道写命令（/op、/stop、/save-all 等）
             process = pb.start();
             running = true;
             exitCode = Integer.MIN_VALUE;
@@ -110,6 +108,7 @@ public final class PumpkinServer {
             appendLine("[app] 已启动");
         } catch (IOException e) {
             appendLine("[app] 启动失败: " + e);
+            appendLine("[app] 若是 'Permission denied'，说明该系统不允许从应用私有目录执行文件");
             running = false;
         }
     }
@@ -170,36 +169,6 @@ public final class PumpkinServer {
         }
     }
 
-    /** 找一个可用的局域网 IPv4，用于提示客户端该连哪个地址。 */
-    public static String findLanIpv4() {
-        try {
-            Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
-            while (ifaces != null && ifaces.hasMoreElements()) {
-                NetworkInterface ni = ifaces.nextElement();
-                if (!ni.isUp() || ni.isLoopback()) {
-                    continue;
-                }
-                String name = ni.getName();
-                if (name != null && (name.startsWith("rmnet") || name.startsWith("dummy")
-                        || name.startsWith("p2p"))) {
-                    continue;
-                }
-                Enumeration<InetAddress> addrs = ni.getInetAddresses();
-                while (addrs.hasMoreElements()) {
-                    InetAddress addr = addrs.nextElement();
-                    if (addr instanceof Inet4Address
-                            && !addr.isLoopbackAddress()
-                            && addr.isSiteLocalAddress()) {
-                        return addr.getHostAddress();
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-            // 拿不到就返回 null，界面显示提示即可
-        }
-        return null;
-    }
-
     public synchronized void stop() {
         if (process == null || !running) {
             appendLine("[app] 服务器未在运行");
@@ -229,5 +198,35 @@ public final class PumpkinServer {
         if (len > MAX_LOG_CHARS) {
             log.delete(0, len - MAX_LOG_CHARS);
         }
+    }
+
+    /** 找一个可用的局域网 IPv4，用于提示客户端该连哪个地址。 */
+    public static String findLanIpv4() {
+        try {
+            Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+            while (ifaces != null && ifaces.hasMoreElements()) {
+                NetworkInterface ni = ifaces.nextElement();
+                if (!ni.isUp() || ni.isLoopback()) {
+                    continue;
+                }
+                String name = ni.getName();
+                if (name != null && (name.startsWith("rmnet") || name.startsWith("dummy")
+                        || name.startsWith("p2p"))) {
+                    continue;
+                }
+                Enumeration<InetAddress> addrs = ni.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    InetAddress addr = addrs.nextElement();
+                    if (addr instanceof Inet4Address
+                            && !addr.isLoopbackAddress()
+                            && addr.isSiteLocalAddress()) {
+                        return addr.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // 拿不到就返回 null
+        }
+        return null;
     }
 }

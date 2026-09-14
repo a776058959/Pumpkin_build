@@ -1,14 +1,9 @@
-name: Build Android APK only (fast)
+name: Build Pumpkin shell APK
 
-# 只重打包 APK 外壳：复用已经编译好的 aarch64-linux-android 原生二进制，
-# 不重新做 Rust 交叉编译，几分钟就能出包。改 App 界面/逻辑后用这个。
+# 只构建「壳」APK：里面**不含**服务端二进制，服务端由 App 运行时从本仓库 Releases 下载。
+# 改界面/逻辑后用这个，几十秒就能出包。
 on:
   workflow_dispatch:
-    inputs:
-      binary_url:
-        description: 'pumpkin-android-arm64 二进制的下载地址（留空则自动用最近 Release 里的）'
-        required: false
-        default: ''
 
 permissions:
   contents: read
@@ -18,50 +13,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout ci branch for APK shell
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set build stamp
         id: stamp
         shell: bash
         run: echo "utc=$(date -u +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
-
-      - name: Fetch Android native binary
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BINARY_URL: ${{ github.event.inputs.binary_url }}
-        run: |
-          mkdir -p apk-input
-          if [ -n "$BINARY_URL" ]; then
-            echo "⬇️ 从指定地址下载二进制"
-            curl -sSL -o apk-input/pumpkin "$BINARY_URL"
-          else
-            ASSET=$(gh release view --repo "${{ github.repository }}" --json assets \
-              --jq '.assets[].name' | grep -E '^pumpkin-android-arm64-[0-9]+$' | head -1)
-            if [ -z "$ASSET" ]; then
-              echo "❌ 最近 Release 里没有 pumpkin-android-arm64-* 资产，请用 binary_url 指定"
-              exit 1
-            fi
-            echo "⬇️ 使用 Release 资产: $ASSET"
-            gh release download --repo "${{ github.repository }}" --pattern "$ASSET" --dir apk-input --clobber
-            SRC=$(find apk-input -type f | head -1)
-            mv "$SRC" apk-input/pumpkin
-          fi
-          chmod +x apk-input/pumpkin
-          ls -lh apk-input/
-          file apk-input/pumpkin || true
-
-      - name: Place binary into jniLibs
-        shell: bash
-        run: |
-          mkdir -p android-app/app/src/main/jniLibs/arm64-v8a
-          cp apk-input/pumpkin android-app/app/src/main/jniLibs/arm64-v8a/libpumpkin.so
-          chmod +x android-app/app/src/main/jniLibs/arm64-v8a/libpumpkin.so
-          ls -l android-app/app/src/main/jniLibs/arm64-v8a/
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -74,7 +34,7 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
+      - name: Build shell APK
         working-directory: android-app
         run: gradle assembleDebug --no-daemon --stacktrace
 
@@ -83,11 +43,11 @@ jobs:
         run: |
           mkdir -p apk-out
           cp android-app/app/build/outputs/apk/debug/app-debug.apk \
-             "apk-out/pumpkin-android-arm64-${{ steps.stamp.outputs.utc }}.apk"
+             "apk-out/pumpkin-shell-${{ steps.stamp.outputs.utc }}.apk"
           ls -lh apk-out
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: pumpkin-android-apk-${{ steps.stamp.outputs.utc }}
+          name: pumpkin-shell-apk-${{ steps.stamp.outputs.utc }}
           path: apk-out/*.apk

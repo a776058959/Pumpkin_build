@@ -9,20 +9,18 @@ android {
     defaultConfig {
         applicationId = "com.pumpkin.server"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
+        // 关键：必须 <= 28。Android 10+ 只在 targetSdk <= 28 时把应用放进 untrusted_app_27 域，
+        // 该域允许对应用私有目录里的文件 execve；>= 29 会被 SELinux 拒绝，
+        // 那样就无法运行「在线下载」的服务端二进制。
+        targetSdk = 28
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     packaging {
         jniLibs {
-            // 关键：必须把 jniLibs 里的可执行文件解压到 nativeLibraryDir，否则无法 exec
+            // 壳不再内置原生库；保留旧行为以防将来又需要内嵌二进制
             useLegacyPackaging = true
-            // 不要对可执行文件做 strip
-            keepDebugSymbols += "**/libpumpkin.so"
         }
     }
 
