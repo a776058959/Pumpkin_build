@@ -14,18 +14,29 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
  * GitHub Releases 客户端：列出可用服务端版本、下载原生二进制。
  *
- * 不需要任何第三方依赖（用 HttpURLConnection + org.json）。
- * API 地址可自定义（{@link Prefs} 里的 api_base），方便手机上直连 GitHub 不通时走镜像。
+ * 下载源策略：直连优先，失败自动回退到内置加速前缀；一旦某个源成功过就记住它，
+ * 下次优先用它。用户也可以在设置里指定自己的 API 地址与镜像前缀。
+ *
+ * 不依赖任何第三方库（HttpURLConnection + org.json）。
  */
 public final class UpdateClient {
 
     public static final String DEFAULT_API_BASE = "https://api.github.com";
     public static final String DEFAULT_REPO = "a776058959/Pumpkin_build";
+
+    /** 内置的 GitHub 加速前缀，空串表示直连。按顺序尝试。 */
+    private static final String[] BUILTIN_PREFIXES = new String[]{
+            "",
+            "https://ghfast.top/",
+            "https://gh-proxy.com/",
+            "https://ghproxy.net/",
+    };
 
     /** 一个可下载的服务端版本。 */
     public static final class Release {
@@ -48,6 +59,10 @@ public final class UpdateClient {
 
         /** 返回 true 继续，false 取消。 */
         boolean isRunning();
+
+        /** 当前下载源失败、准备换下一个时回调（可选实现）。 */
+        default void onSourceFailed(String url, String reason) {
+        }
     }
 
     private final Context ctx;
@@ -66,7 +81,7 @@ public final class UpdateClient {
         return (v == null || v.trim().isEmpty()) ? DEFAULT_REPO : v.trim();
     }
 
-    /** 列出最近发布的服务端版本（只保留带 Android 二进制附件的）。 */
+    /** 列出最近发布的服务端版本（只保留带 Android 二进制的）。 */
     public List<Release> fetchReleases() throws IOException {
         List<Release> out = new ArrayList<>();
         String url = apiBase(ctx) + "/repos/" + repo(ctx) + "/releases?per_page=30";
@@ -110,40 +125,63 @@ public final class UpdateClient {
         return out;
     }
 
-    /** 下载到 cache 目录，返回临时文件；失败会自动重试（最多 3 次）。 */
+    /** 逐个尝试所有下载源（直连 → 上次成功的源 → 用户镜像 → 内置加速），任一成功即可。 */
     public File download(Release release, Progress progress) throws IOException {
+        if (release == null || release.binaryUrl == null) {
+            throw new IOException("该版本没有可下载的 Android 二进制");
+        }
+        String raw = release.binaryUrl;
+
+        // 顺序：上次成功的源 → 用户自填镜像 → 内置列表（含直连）
+        LinkedHashSet<String> prefixes = new LinkedHashSet<>();
+        String remembered = Prefs.get(ctx, "good_prefix", "");
+        if (remembered != null && !remembered.isEmpty()) {
+            prefixes.add(remembered);
+        }
+        String userMirror = Prefs.get(ctx, "download_mirror", "");
+        if (userMirror != null && !userMirror.trim().isEmpty()) {
+            prefixes.add(userMirror.trim());
+        }
+        for (String p : BUILTIN_PREFIXES) {
+            prefixes.add(p);
+        }
+
         IOException last = null;
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            try {
-                return downloadOnce(release, progress);
-            } catch (IOException e) {
-                last = e;
-                if (progress != null && !progress.isRunning()) {
-                    break;
-                }
-                if (attempt < 3) {
-                    try {
-                        Thread.sleep(1500L * attempt);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
+        for (String prefix : prefixes) {
+            String url = prefix.isEmpty() ? raw : prefix + raw;
+            if (progress != null && !progress.isRunning()) {
+                throw new IOException("已取消");
+            }
+            for (int attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    File f = downloadFrom(url, release, progress);
+                    Prefs.put(ctx, "good_prefix", prefix);
+                    return f;
+                } catch (IOException e) {
+                    last = e;
+                    if (progress != null) {
+                        progress.onSourceFailed(url, e.getMessage() == null ? "失败" : e.getMessage());
+                    }
+                    if (progress != null && !progress.isRunning()) {
+                        throw new IOException("已取消");
+                    }
+                    if (attempt == 1) {
+                        try {
+                            Thread.sleep(800L);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
                     }
                 }
             }
         }
-        throw (last != null) ? last : new IOException("下载失败");
+        throw (last != null) ? last : new IOException("所有下载源都失败了（可在设置里换镜像）");
     }
 
-    private File downloadOnce(Release release, Progress progress) throws IOException {
-        if (release == null || release.binaryUrl == null) {
-            throw new IOException("该版本没有可下载的 Android 二进制");
-        }
-        File tmp = new File(ServerPaths.downloadCacheDir(ctx), release.tag.replaceAll("[^A-Za-z0-9._-]", "_") + ".part");
-        String url = release.binaryUrl;
-        String mirror = Prefs.get(ctx, "download_mirror", "");
-        if (mirror != null && !mirror.trim().isEmpty() && url.startsWith("https://github.com/")) {
-            url = mirror.trim() + url;
-        }
+    private File downloadFrom(String url, Release release, Progress progress) throws IOException {
+        File tmp = new File(ServerPaths.downloadCacheDir(ctx),
+                release.tag.replaceAll("[^A-Za-z0-9._-]", "_") + ".part");
         HttpURLConnection conn = open(url);
         long total = conn.getContentLength();
         if (total <= 0) {

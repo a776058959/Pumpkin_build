@@ -31,6 +31,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -84,7 +85,8 @@ public class MainActivity extends Activity {
     private EditText repoInput;
     private EditText mirrorInput;
 
-    private UpdateClient.Release latest;
+    private final List<UpdateClient.Release> available = new ArrayList<>();
+    private UpdateClient.Release selected;
     private volatile boolean busy;
     private volatile boolean cancelRequested;
 
@@ -337,8 +339,11 @@ public class MainActivity extends Activity {
         verCard.addView(versionHint);
 
         checkBtn = UiKit.button(this, "检查更新", false);
-        installBtn = UiKit.button(this, "下载最新版本", true);
-        verCard.addView(UiKit.buttonRow(this, checkBtn, installBtn));
+        Button pickBtn = UiKit.button(this, "选择版本", false);
+        verCard.addView(UiKit.buttonRow(this, checkBtn, pickBtn));
+
+        installBtn = UiKit.button(this, "下载", true);
+        verCard.addView(UiKit.buttonRow(this, installBtn));
 
         Button switchBtn = UiKit.button(this, "切换 / 回滚", false);
         Button deleteBtn = UiKit.button(this, "删除版本", false);
@@ -356,6 +361,7 @@ public class MainActivity extends Activity {
         col.addView(tipsCard);
 
         checkBtn.setOnClickListener(v -> doCheck());
+        pickBtn.setOnClickListener(v -> showVersionPicker());
         installBtn.setOnClickListener(v -> doInstallOrStop());
         switchBtn.setOnClickListener(v -> showSwitchDialog());
         deleteBtn.setOnClickListener(v -> showDeleteDialog(versions.listInstalled()));
@@ -448,7 +454,8 @@ public class MainActivity extends Activity {
                     return;
                 }
                 versions.clearAllVersions();
-                latest = null;
+                selected = null;
+                available.clear();
                 toast("已清理服务端版本");
                 refresh();
             }
@@ -474,7 +481,8 @@ public class MainActivity extends Activity {
                 }
                 versions.clearAllVersions();
                 VersionManager.clearServerData(MainActivity.this);
-                latest = null;
+                selected = null;
+                available.clear();
                 toast("已全部清空");
                 refresh();
             }
@@ -633,13 +641,13 @@ public class MainActivity extends Activity {
 
         String cur = versions.currentTag();
         List<VersionManager.Installed> installed = versions.listInstalled();
-        if (cur == null) {
-            versionCurrent.setText("尚未安装服务端");
-            installBtn.setText("下载最新版本");
+        versionCurrent.setText(cur == null ? "尚未安装服务端" : cur);
+        if (selected == null) {
+            installBtn.setText("下载");
+        } else if (versions.isInstalled(selected.tag)) {
+            installBtn.setText("重新下载 " + selected.tag);
         } else {
-            versionCurrent.setText(cur);
-            installBtn.setText(latest != null && !latest.tag.equals(cur)
-                    ? "更新到 " + latest.tag : "重新下载当前版本");
+            installBtn.setText("下载 " + selected.tag);
         }
         StringBuilder sb = new StringBuilder();
         sb.append("已安装 ").append(installed.size()).append(" 个版本");
@@ -801,6 +809,66 @@ public class MainActivity extends Activity {
 
     // ================================================================ 版本管理
 
+    /** 根据当前选中的版本刷新提示文案。 */
+    private void updateVersionHint() {
+        if (selected == null) {
+            versionHint.setText("点「检查更新」获取可用版本列表");
+            return;
+        }
+        String cur = versions.currentTag();
+        StringBuilder sb = new StringBuilder();
+        sb.append("已选中 ").append(selected.tag);
+        if (selected.binarySize > 0) {
+            sb.append("　").append(fmtSize(selected.binarySize));
+        }
+        if (selected.publishedAt != null && selected.publishedAt.length() >= 10) {
+            sb.append("　").append(selected.publishedAt.substring(0, 10));
+        }
+        sb.append("\n共 ").append(available.size())
+                .append(" 个可用版本，默认选最新的；点「选择版本」可换");
+        if (cur != null && cur.equals(selected.tag)) {
+            sb.append("\n（这就是当前运行的版本）");
+        } else if (versions.isInstalled(selected.tag)) {
+            sb.append("\n（该版本已下载，可到「切换 / 回滚」直接启用）");
+        }
+        sb.append("\n下载会自动尝试直连和多个加速源，某个源不通会自己换下一个");
+        versionHint.setText(sb.toString());
+    }
+
+    /** 选择要下载的版本（默认最新）。 */
+    private void showVersionPicker() {
+        if (available.isEmpty()) {
+            toast("先点「检查更新」");
+            return;
+        }
+        final String cur = versions.currentTag();
+        final String[] items = new String[available.size()];
+        for (int i = 0; i < available.size(); i++) {
+            UpdateClient.Release r = available.get(i);
+            StringBuilder sb = new StringBuilder();
+            sb.append(r.tag.equals(cur) ? "● " : "○ ").append(r.tag);
+            if (r.binarySize > 0) {
+                sb.append("　").append(fmtSize(r.binarySize));
+            }
+            if (versions.isInstalled(r.tag)) {
+                sb.append("　[已下载]");
+            }
+            items[i] = sb.toString();
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("选择要下载的版本")
+                .setItems(items, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        selected = available.get(which);
+                        updateVersionHint();
+                        refresh();
+                        toast("已选中 " + selected.tag);
+                    }
+                })
+                .show();
+    }
+
     private void doCheck() {
         if (busy) {
             toast("正在忙，请稍候");
@@ -824,21 +892,11 @@ public class MainActivity extends Activity {
                                 installBtn.setEnabled(false);
                                 return;
                             }
-                            latest = list.get(0);
+                            available.clear();
+                            available.addAll(list);
+                            selected = list.get(0);   // 默认选中最新
                             installBtn.setEnabled(true);
-                            String cur = versions.currentTag();
-                            StringBuilder sb = new StringBuilder();
-                            sb.append("最新 ").append(latest.tag);
-                            if (latest.binarySize > 0) {
-                                sb.append("　").append(fmtSize(latest.binarySize));
-                            }
-                            if (cur != null && cur.equals(latest.tag)) {
-                                sb.append("\n已是最新版本");
-                            } else if (cur != null) {
-                                sb.append("\n可更新（当前 ").append(cur).append("）");
-                            }
-                            sb.append("\n共找到 ").append(list.size()).append(" 个可用版本");
-                            versionHint.setText(sb.toString());
+                            updateVersionHint();
                             refresh();
                         }
                     });
@@ -862,9 +920,9 @@ public class MainActivity extends Activity {
             toast("正在忙，请稍候");
             return;
         }
-        if (latest == null) {
+        if (selected == null) {
             doCheck();
-            toast("先检查更新，再点一次下载");
+            toast("先点「检查更新」，再用「选择版本」挑一个");
             return;
         }
         if (PumpkinServer.get().isRunning()) {
@@ -878,7 +936,7 @@ public class MainActivity extends Activity {
                             ui.postDelayed(new Runnable() {
                                 @Override
                                 public void run() {
-                                    doDownloadInstall(latest);
+                                    doDownloadInstall(selected);
                                 }
                             }, 1200);
                         }
@@ -887,7 +945,7 @@ public class MainActivity extends Activity {
                     .show();
             return;
         }
-        doDownloadInstall(latest);
+        doDownloadInstall(selected);
     }
 
     private void doDownloadInstall(final UpdateClient.Release release) {
@@ -922,6 +980,19 @@ public class MainActivity extends Activity {
                         @Override
                         public boolean isRunning() {
                             return !cancelRequested;
+                        }
+
+                        @Override
+                        public void onSourceFailed(final String url, final String reason) {
+                            ui.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    String shortUrl = url.length() > 52
+                                            ? url.substring(0, 52) + "…" : url;
+                                    versionHint.setText("这个下载源不可用，正在自动换源…\n"
+                                            + shortUrl + "\n" + reason);
+                                }
+                            });
                         }
                     });
                     versions.install(release.tag, tmp);
