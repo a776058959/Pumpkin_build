@@ -107,6 +107,14 @@ public class MainActivity extends Activity {
     private volatile boolean busy;
     private volatile boolean cancelRequested;
 
+    /**
+     * Compose UI 的可观察状态。
+     *
+     * 说明：这是「Java 业务 → Compose 界面」的唯一通道。业务方法本身一行没改，
+     * 只是把原来 setText 的地方改成写这里，Compose 侧读状态自动重组。
+     */
+    private com.pumpkin.server.ui.PumpkinUiState state;
+
     private final Runnable ticker = new Runnable() {
         @Override
         public void run() {
@@ -126,6 +134,7 @@ public class MainActivity extends Activity {
         versions = new VersionManager(this);
         updates = new UpdateClient(this);
         downloader = new Downloader(this);
+        state = new com.pumpkin.server.ui.PumpkinUiState();
         View root = buildUi();
         setContentView(root);
         applyInsets(root);
@@ -865,7 +874,238 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        syncState();
     }
+
+    // ================================================================ Compose 状态桥接
+
+    /**
+     * 把 Java 侧的业务状态推给 Compose 状态对象。
+     *
+     * 调用时机与 refresh() 一致（每秒一次 + 各动作后）。这里只读不写业务，
+     * 所以即使 Compose 界面还没启用也不会有副作用。
+     */
+    private void syncState() {
+        com.pumpkin.server.ui.PumpkinUiState s = state;
+        if (s == null) {
+            return;
+        }
+        PumpkinServer server = PumpkinServer.get();
+
+        s.setRunning(server.isRunning());
+        s.setHasExitCode(server.getExitCode() != Integer.MIN_VALUE);
+        s.setStatusText(statusText.getText().toString());
+
+        String lan = PumpkinServer.findLanIpv4();
+        s.setAddrText(lan == null
+                ? "未检测到局域网 IP（确认已连上 WiFi）"
+                : "Java " + lan + ":25565　·　基岩 " + lan + ":19132");
+        s.setDirText("数据目录 " + ServerPaths.workDir(this).getAbsolutePath());
+
+        boolean rootMode = Prefs.getBool(this, "root_mode", false);
+        s.setModeValue(rootMode
+                ? "Root 模式（su，不改 SELinux）"
+                : "普通模式（targetSdk 28 豁免）");
+
+        String cur = versions.currentTag();
+        List<VersionManager.Installed> installed = versions.listInstalled();
+        s.setVersionCurrent(cur == null ? "尚未安装服务端" : cur);
+        s.setVersionSelected(selected == null
+                ? "未选择要下载的版本"
+                : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
+        s.setVersionHint(versionHint.getText().toString());
+        s.setVersionInstalled(versionInstalled.getText().toString());
+        s.setLocalCount(localCount == null ? "" : localCount.getText().toString());
+
+        s.getInstalledTags().clear();
+        for (VersionManager.Installed v : installed) {
+            s.getInstalledTags().add(v.tag);
+        }
+
+        // 日志整段同步：Compose 侧只做展示，不做增量 diff，避免两边状态不一致。
+        s.setLogText(PumpkinServer.get().tailLog());
+
+        // 下载相关三态
+        Downloader.State st = downloader.getState();
+        s.setInstallButtonText(installBtn.getText().toString());
+        s.setInstallButtonEnabled(installBtn.isEnabled());
+        s.setDeleteTaskEnabled(deleteTaskBtn.isEnabled());
+        s.setCheckEnabled(checkBtn.isEnabled());
+        s.setDownloadProgressVisible(progress.getVisibility() == View.VISIBLE);
+        s.setDownloadProgress(progress.getProgress() / (float) progress.getMax());
+        s.setDownloadHint(downloadHint.getText().toString());
+
+        s.setShellVersion(versionName());
+        s.setShowUpdateDot(dotView != null && dotView.getVisibility() == View.VISIBLE);
+
+        // 设置页输入框：只在用户没在编辑时回填，否则会打断输入。
+        if (!apiInput.hasFocus()) {
+            s.setApiBase(apiInput.getText().toString());
+        }
+        if (!repoInput.hasFocus()) {
+            s.setRepo(repoInput.getText().toString());
+        }
+        if (!mirrorInput.hasFocus()) {
+            s.setMirror(mirrorInput.getText().toString());
+        }
+    }
+
+    // ---- 供 Compose 调用的桥接方法（都只是转调原有私有方法，业务逻辑不变） ----
+
+    /** 底部导航点了第 index 项。 */
+    public void onNavItemSelected(int index) {
+        if (index < 0 || index > PAGE_SETTINGS) {
+            return;
+        }
+        if (index == PAGE_SETTINGS || index == PAGE_UPDATE || index == PAGE_RUN) {
+            switchPage(index);
+        }
+    }
+
+    public void startServerFromUi() {
+        startServer();
+    }
+
+    public void stopServerFromUi() {
+        stopServer();
+    }
+
+    public void openBatterySettingsFromUi() {
+        openBatterySettings();
+    }
+
+    public void copyAddressFromUi() {
+        copyAddress();
+    }
+
+    public void copyWorkDirFromUi() {
+        copyWorkDir();
+    }
+
+    public void showSwitchDialogFromUi() {
+        showSwitchDialog();
+    }
+
+    public void showModeDialogFromUi() {
+        showModeDialog();
+    }
+
+    public void sendCommandFromUi(String cmd) {
+        if (cmd == null || cmd.trim().isEmpty()) {
+            return;
+        }
+        PumpkinServer.get().sendCommand(cmd);
+        if (state != null) {
+            state.setCommand("");
+        }
+        refresh();
+    }
+
+    public void doCheckFromUi() {
+        doCheck();
+    }
+
+    public void showVersionPickerFromUi() {
+        showVersionPicker();
+    }
+
+    public void onDownloadButtonClickedFromUi() {
+        onDownloadButtonClicked();
+    }
+
+    public void onDeleteTaskClickedFromUi() {
+        onDeleteTaskClicked();
+    }
+
+    public void showDeleteDialogFromUi() {
+        showDeleteDialog(versions.listInstalled());
+    }
+
+    public void checkShellUpdateFromUi() {
+        checkShellUpdate();
+    }
+
+    /** 保存下载源。参数来自 Compose 侧的输入框（原方法读 EditText，这里改为显式传参）。 */
+    public void saveSourceFromUi(String api, String repo, String mirror) {
+        Prefs.put(this, "api_base", api == null ? "" : api.trim());
+        Prefs.put(this, "repo", repo == null ? "" : repo.trim());
+        Prefs.put(this, "download_mirror", mirror == null ? "" : mirror.trim());
+        toast("已保存下载源设置");
+        refresh();
+    }
+
+    /**
+     * 设置页点选某个加速源：写入镜像前缀并同步到输入框。
+     *
+     * @param prefix 加速前缀，空串表示直连。
+     */
+    public void applyMirrorFromUi(String prefix) {
+        String p = prefix == null ? "" : prefix.trim();
+        Prefs.put(this, "download_mirror", p);
+        // 用户手动选了源，就把「上次成功记住的源」清掉，
+        // 否则它会排在手动选择前面，造成「选了不生效」的错觉。
+        Prefs.put(this, "good_prefix", "");
+        if (mirrorInput != null) {
+            mirrorInput.setText(p);
+        }
+        if (state != null) {
+            state.setMirror(p);
+        }
+        toast(p.isEmpty() ? "已改为直连（不加速）" : "已选用加速源：" + p);
+        refresh();
+    }
+
+    public void clearVersionsFromUi() {
+        confirm("确定删除所有已下载的服务端版本吗？游戏数据会保留。", new Runnable() {
+            @Override
+            public void run() {
+                if (PumpkinServer.get().isRunning()) {
+                    toast("请先停止服务端");
+                    return;
+                }
+                versions.clearAllVersions();
+                selected = null;
+                available.clear();
+                toast("已清理服务端版本");
+                refresh();
+            }
+        });
+    }
+
+    public void clearGameDataFromUi() {
+        confirm("确定删除世界存档、配置和日志吗？此操作不可恢复。", new Runnable() {
+            @Override
+            public void run() {
+                if (PumpkinServer.get().isRunning()) {
+                    toast("请先停止服务端");
+                    return;
+                }
+                VersionManager.clearServerData(MainActivity.this);
+                toast("已清理游戏数据");
+                refresh();
+            }
+        });
+    }
+
+    public void clearAllFromUi() {
+        confirm("确定清空全部数据吗？包括所有服务端版本和世界存档，不可恢复。", new Runnable() {
+            @Override
+            public void run() {
+                if (PumpkinServer.get().isRunning()) {
+                    toast("请先停止服务端");
+                    return;
+                }
+                versions.clearAllVersions();
+                VersionManager.clearServerData(MainActivity.this);
+                selected = null;
+                available.clear();
+                toast("已全部清空");
+                refresh();
+            }
+        });
+    }
+}
 
     private static String fmtSize(long bytes) {
         if (bytes < 1024) {
