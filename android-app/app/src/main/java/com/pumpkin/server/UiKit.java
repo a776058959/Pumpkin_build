@@ -49,13 +49,13 @@ public final class UiKit {
                 new int[]{BG_TOP, BG_BOTTOM});
     }
 
-    /** 玻璃卡片背景（半透明 + 描边 + 大圆角）。 */
+    /** 玻璃卡片背景（半透明 + 描边 + 大圆角）。导航栏背后有模糊层，这里可以调得更透。 */
     public static GradientDrawable glass(Context ctx, boolean strong) {
         GradientDrawable d = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{strong ? 0x2EFFFFFF : GLASS, strong ? 0x14FFFFFF : 0x0DFFFFFF});
+                new int[]{strong ? 0x1CFFFFFF : 0x12FFFFFF, strong ? 0x0AFFFFFF : 0x08FFFFFF});
         d.setCornerRadius(dp(ctx, 26));
-        d.setStroke(dp(ctx, 1), STROKE);
+        d.setStroke(dp(ctx, 1), strong ? 0x40FFFFFF : STROKE);
         return d;
     }
 

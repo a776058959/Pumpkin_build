@@ -24,6 +24,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -55,6 +56,9 @@ public class MainActivity extends Activity {
     private View pageSettings;
     private final TextView[] tabIcons = new TextView[3];
     private final TextView[] tabLabels = new TextView[3];
+    private FrameLayout contentArea;
+    private ImageView navBlur;
+    private BlurBackdrop backdrop;
 
     // 运行页
     private TextView statusDot;
@@ -87,6 +91,9 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             refresh();
+            if (backdrop != null) {
+                backdrop.refresh();
+            }
             ui.postDelayed(this, 1000);
         }
     };
@@ -119,6 +126,9 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         cancelRequested = true;
+        if (backdrop != null) {
+            backdrop.release();
+        }
     }
 
     // ================================================================ 整体布局
@@ -127,25 +137,38 @@ public class MainActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
         root.setBackground(UiKit.windowBackground());
 
-        FrameLayout content = new FrameLayout(this);
-        content.setPadding(0, 0, 0, UiKit.dp(this, 96));
-        root.addView(content, new FrameLayout.LayoutParams(
+        contentArea = new FrameLayout(this);
+        contentArea.setPadding(0, 0, 0, UiKit.dp(this, 96));
+        // 内容区自己也画一份同样的渐变底：截屏做毛玻璃时才不会是一片透明
+        contentArea.setBackground(UiKit.windowBackground());
+        root.addView(contentArea, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         pageRun = buildRunPage();
         pageUpdate = buildUpdatePage();
         pageSettings = buildSettingsPage();
-        content.addView(pageRun);
-        content.addView(pageUpdate);
-        content.addView(pageSettings);
+        contentArea.addView(pageRun);
+        contentArea.addView(pageUpdate);
+        contentArea.addView(pageSettings);
 
-        FrameLayout.LayoutParams navParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM);
-        navParams.setMargins(UiKit.dp(this, 18), 0, UiKit.dp(this, 18), UiKit.dp(this, 18));
-        root.addView(buildBottomNav(), navParams);
+        // 毛玻璃层：与导航栏同位置同尺寸，显示「导航栏背后的模糊内容」
+        navBlur = new ImageView(this);
+        navBlur.setScaleType(ImageView.ScaleType.FIT_XY);
+        root.addView(navBlur, navParams());
+
+        root.addView(buildBottomNav(), navParams());
+
+        backdrop = new BlurBackdrop(contentArea, navBlur);
 
         return root;
+    }
+
+    private FrameLayout.LayoutParams navParams() {
+        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM);
+        p.setMargins(UiKit.dp(this, 18), 0, UiKit.dp(this, 18), UiKit.dp(this, 18));
+        return p;
     }
 
     private ScrollView pageContainer() {
