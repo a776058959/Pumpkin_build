@@ -448,7 +448,7 @@ jobs:
             fi
           done
           # Android 安装包（APK）
-          find artifacts -name "*.apk" -exec cp {} release_files/ \;
+          find artifacts -name "*.apk" -exec cp {} release_files/pumpkin-shell.apk \;
           ls -la release_files
 
       # 创建 Release
