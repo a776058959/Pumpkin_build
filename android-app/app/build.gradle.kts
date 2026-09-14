@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.pumpkin.server"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.pumpkin.server"
