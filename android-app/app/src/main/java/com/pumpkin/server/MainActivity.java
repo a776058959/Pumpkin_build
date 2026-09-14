@@ -18,8 +18,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
+import android.graphics.Insets;
 import android.view.Gravity;
 import android.view.View;
+import android.view.Window;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
@@ -80,7 +84,6 @@ public class MainActivity extends Activity {
 
     // 设置页
     private TextView modeValue;
-    private TextView diagText;
     private EditText apiInput;
     private EditText repoInput;
     private EditText mirrorInput;
@@ -104,12 +107,60 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        applyEdgeToEdge();
         versions = new VersionManager(this);
         updates = new UpdateClient(this);
-        setContentView(buildUi());
+        View root = buildUi();
+        setContentView(root);
+        applyInsets(root);
         switchPage(PAGE_RUN);
         requestNotificationPermissionIfNeeded();
         ui.post(ticker);
+    }
+
+    /**
+     * 沉浸式：让窗口内容铺到状态栏与导航栏下面，消除上下两条系统黑边。
+     * 状态栏/导航栏设为透明，背景由我们自己的渐变负责。
+     */
+    private void applyEdgeToEdge() {
+        Window window = getWindow();
+        window.setStatusBarColor(Color.TRANSPARENT);
+        window.setNavigationBarColor(Color.TRANSPARENT);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+            // 背景是深色，状态栏图标必须用浅色，否则在浅色系统主题的 ROM 上会看不清
+            if (window.getInsetsController() != null) {
+                window.getInsetsController().setSystemBarsAppearance(
+                        0, WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
+            }
+        } else {
+            window.getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        }
+    }
+
+    /** 把系统栏占用的高度变成内边距，内容不会被状态栏或手势条挡住。 */
+    private void applyInsets(final View root) {
+        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            @Override
+            public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+                int top;
+                int bottom;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                    top = bars.top;
+                    bottom = bars.bottom;
+                } else {
+                    top = insets.getSystemWindowInsetTop();
+                    bottom = insets.getSystemWindowInsetBottom();
+                }
+                v.setPadding(0, top, 0, bottom);
+                return insets;
+            }
+        });
+        root.requestApplyInsets();
     }
 
     @Override
@@ -350,16 +401,6 @@ public class MainActivity extends Activity {
         verCard.addView(UiKit.buttonRow(this, switchBtn, deleteBtn));
         col.addView(verCard);
 
-        LinearLayout tipsCard = UiKit.card(this);
-        tipsCard.addView(UiKit.cardTitle(this, "说明"));
-        tipsCard.addView(UiKit.label(this,
-                "· 服务端程序保存在应用内部私有目录（那里才允许执行）\n"
-                        + "· 游戏数据在外部目录，插 USB 或文件管理器即可修改\n"
-                        + "· 最多保留 3 个历史版本用于回滚\n"
-                        + "· 更新会替换程序文件，需先停止服务器\n"
-                        + "· 下载源不通时到「设置」页改镜像"));
-        col.addView(tipsCard);
-
         checkBtn.setOnClickListener(v -> doCheck());
         pickBtn.setOnClickListener(v -> showVersionPicker());
         installBtn.setOnClickListener(v -> doInstallOrStop());
@@ -383,9 +424,7 @@ public class MainActivity extends Activity {
         modeValue = UiKit.value(this, "");
         modeCard.addView(modeValue);
         modeCard.addView(UiKit.label(this,
-                "普通模式：App 直接启动，依赖 targetSdk 28 的 SELinux 域豁免。\n"
-                        + "Root 模式：通过 su 启动（进程落在 magisk/su 域），不改动 SELinux，"
-                        + "不会被检测软件发现；普通模式若报 Permission denied 就用它。"));
+                "普通模式开箱即用。若启动时报权限错误，切到 Root 模式再试。"));
         Button modeBtn = UiKit.button(this, "切换启动方式", false);
         modeCard.addView(UiKit.buttonRow(this, modeBtn));
         col.addView(modeCard);
@@ -394,8 +433,7 @@ public class MainActivity extends Activity {
         LinearLayout srcCard = UiKit.card(this);
         srcCard.addView(UiKit.cardTitle(this, "下载源"));
         srcCard.addView(UiKit.label(this,
-                "手机直连 GitHub 不通时改这里。API 地址需返回与 GitHub 相同的 JSON；"
-                        + "镜像前缀会拼在 https://github.com/... 前面（例如 https://ghfast.top/）。"));
+                "平时不用改。下载失败时会自动换源，这里可手动指定。"));
 
         apiInput = new EditText(this);
         apiInput.setHint("API 地址，如 https://api.github.com");
@@ -422,8 +460,6 @@ public class MainActivity extends Activity {
         // 清理
         LinearLayout cleanCard = UiKit.card(this);
         cleanCard.addView(UiKit.cardTitle(this, "清理数据"));
-        cleanCard.addView(UiKit.label(this,
-                "可以分开清理：只清服务端程序、只清游戏数据（世界/配置/日志），或者全部清空。"));
         Button cleanVerBtn = UiKit.button(this, "清服务端版本", false);
         Button cleanDataBtn = UiKit.button(this, "清游戏数据", false);
         cleanCard.addView(UiKit.buttonRow(this, cleanVerBtn, cleanDataBtn));
@@ -434,11 +470,7 @@ public class MainActivity extends Activity {
         // 关于
         LinearLayout aboutCard = UiKit.card(this);
         aboutCard.addView(UiKit.cardTitle(this, "关于"));
-        aboutCard.addView(UiKit.value(this,
-                "壳版本 " + versionName() + "（不含服务端）\n"
-                        + "服务端机器 " + UpdateClient.repo(this)));
-        diagText = UiKit.label(this, "");
-        aboutCard.addView(diagText);
+        aboutCard.addView(UiKit.value(this, "壳版本 " + versionName()));
         Button battBtn2 = UiKit.button(this, "电池优化设置", false);
         Button dirBtn = UiKit.button(this, "数据目录路径", false);
         aboutCard.addView(UiKit.buttonRow(this, battBtn2, dirBtn));
@@ -630,15 +662,6 @@ public class MainActivity extends Activity {
         if (modeValue != null) {
             modeValue.setText(rootMode ? "Root 模式（su，不改 SELinux）" : "普通模式（targetSdk 28 豁免）");
         }
-        if (diagText != null && navBlur != null) {
-            String path = navBlur.canUseRenderNode() ? "硬件 RenderNode" : "软件 Bitmap";
-            diagText.setText("诊断：API " + Build.VERSION.SDK_INT
-                    + " · 模糊路径 " + path
-                    + (navBlur.isEffectApplied() ? "（已应用）" : "（未应用）")
-                    + "\n模糊层尺寸 " + navBlur.getWidth() + "×" + navBlur.getHeight() + "px"
-                    + " · 内容区 " + (contentArea == null ? "?" : contentArea.getWidth() + "×" + contentArea.getHeight()));
-        }
-
         String cur = versions.currentTag();
         List<VersionManager.Installed> installed = versions.listInstalled();
         versionCurrent.setText(cur == null ? "尚未安装服务端" : cur);
@@ -659,10 +682,7 @@ public class MainActivity extends Activity {
         versionInstalled.setText(sb.toString());
 
         String text = server.tailLog();
-        String display = text.isEmpty()
-                ? "（还没有日志）\n\n启动服务器后这里会实时输出。\n"
-                        + "下面的输入框可以直接发控制台命令：list、op 玩家名、save-all、stop"
-                : text;
+        String display = text.isEmpty() ? "（还没有日志）\n启动服务器后这里会实时输出" : text;
         if (!display.contentEquals(logView.getText())) {
             logView.setTextColor(text.isEmpty() ? UiKit.TEXT_DIM : 0xFFCFD6E4);
             logView.setText(display);
@@ -831,7 +851,6 @@ public class MainActivity extends Activity {
         } else if (versions.isInstalled(selected.tag)) {
             sb.append("\n（该版本已下载，可到「切换 / 回滚」直接启用）");
         }
-        sb.append("\n下载会自动尝试直连和多个加速源，某个源不通会自己换下一个");
         versionHint.setText(sb.toString());
     }
 
@@ -907,7 +926,7 @@ public class MainActivity extends Activity {
                             busy = false;
                             checkBtn.setEnabled(true);
                             versionHint.setText("检查失败：" + e.getMessage()
-                                    + "\n请到「设置」页确认下载源（手机直连 GitHub 常不通）");
+                                    + "\n可在「设置」页指定下载源");
                         }
                     });
                 }
