@@ -49,7 +49,9 @@ public final class BlurBackdrop {
             return;
         }
         long now = System.currentTimeMillis();
-        if (now - lastDraw < 200) {
+        // 节流：太频繁会浪费 GPU，太稀疏则滚动时模糊会"卡"在旧画面上。
+        // 80ms 约等于 12fps 的模糊更新，滚动时基本跟手。
+        if (now - lastDraw < 80) {
             return;
         }
         lastDraw = now;

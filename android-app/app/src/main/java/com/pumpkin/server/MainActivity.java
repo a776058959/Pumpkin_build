@@ -190,6 +190,16 @@ public class MainActivity extends Activity {
     private ScrollView pageContainer() {
         ScrollView sv = new ScrollView(this);
         sv.setFillViewport(true);
+        // 滚动过程中立刻刷新背后的毛玻璃，否则模糊层会滞留在上一帧内容上（观感就是"延迟"）。
+        sv.setOnScrollChangeListener(new View.OnScrollChangeListener() {
+            @Override
+            public void onScrollChange(View v, int scrollX, int scrollY,
+                                       int oldScrollX, int oldScrollY) {
+                if (backdrop != null) {
+                    backdrop.refresh();
+                }
+            }
+        });
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         int pad = UiKit.dp(this, 16);
