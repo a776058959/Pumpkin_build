@@ -7,12 +7,20 @@ import android.os.Looper;
 import java.io.File;
 
 /**
- * 服务端下载任务：进度回调、暂停、继续（断点续传）、删除任务。
+ * 服务端下载任务。
  *
- * 暂停时保留未完成的 .part 文件，继续时用 HTTP Range 从断点接着下；
- * 换下载源后无法保证 Range 有效，会自动退回从头下。
+ * 只有三种状态，并且是**唯一的状态源**——界面按钮必须完全由它推导，
+ * 不要在别处（例如每秒刷新的 refresh）另设判断，否则两边会互相覆盖。
+ *
+ *   IDLE    没有任务（未开始 / 已完成 / 已失败 / 已删除）
+ *   RUNNING 正在下载
+ *   PAUSED  已暂停，磁盘上保留了 .part，可以继续或删除
+ *
+ * 暂停时保留未完成文件，继续时用 HTTP Range 从断点接着下。
  */
 public final class Downloader {
+
+    public enum State { IDLE, RUNNING, PAUSED }
 
     public interface Listener {
         void onProgress(long done, long total);
@@ -31,8 +39,8 @@ public final class Downloader {
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     private UpdateClient.Release release;
+    private volatile State state = State.IDLE;
     private volatile boolean pauseRequested;
-    private volatile boolean running;
     private volatile long done;
     private volatile long total;
 
@@ -41,8 +49,21 @@ public final class Downloader {
         this.client = new UpdateClient(this.ctx);
     }
 
+    public State getState() {
+        return state;
+    }
+
     public boolean isRunning() {
-        return running;
+        return state == State.RUNNING;
+    }
+
+    public boolean isPaused() {
+        return state == State.PAUSED;
+    }
+
+    /** 只有「已暂停」才算有一个可继续 / 可删除的任务。 */
+    public boolean hasTask() {
+        return state == State.PAUSED;
     }
 
     public UpdateClient.Release getRelease() {
@@ -61,20 +82,16 @@ public final class Downloader {
         return release == null ? null : client.partFile(release);
     }
 
-    /** 是否有已暂停、可继续或可删除的任务。 */
-    public boolean hasTask() {
-        return release != null && !running;
-    }
-
     public void forget() {
         release = null;
         done = 0;
         total = 0;
+        state = State.IDLE;
     }
 
-    /** 开始下载；若存在未完成的 .part 则自动续传。 */
+    /** 开始下载；若存在未完成的 .part 会自动续传。 */
     public void start(UpdateClient.Release r, final Listener listener) {
-        if (running) {
+        if (state == State.RUNNING) {
             return;
         }
         if (r != null) {
@@ -89,7 +106,7 @@ public final class Downloader {
         final long offset = part.isFile() ? part.length() : 0L;
 
         pauseRequested = false;
-        running = true;
+        state = State.RUNNING;
         done = offset;
         total = target.binarySize;
 
@@ -97,7 +114,7 @@ public final class Downloader {
             @Override
             public void run() {
                 try {
-                    File f = client.download(target, new UpdateClient.Progress() {
+                    final File f = client.download(target, new UpdateClient.Progress() {
                         @Override
                         public void onProgress(final long d, final long tot) {
                             done = d;
@@ -125,7 +142,9 @@ public final class Downloader {
                             });
                         }
                     }, offset);
-                    running = false;
+                    // 下载完成：任务结束，回到 IDLE
+                    state = State.IDLE;
+                    release = null;
                     ui.post(new Runnable() {
                         @Override
                         public void run() {
@@ -133,18 +152,26 @@ public final class Downloader {
                         }
                     });
                 } catch (final Exception e) {
-                    running = false;
-                    final boolean wasPaused = pauseRequested;
-                    ui.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (wasPaused) {
+                    if (pauseRequested) {
+                        // 暂停：保留 .part，进入 PAUSED
+                        state = State.PAUSED;
+                        ui.post(new Runnable() {
+                            @Override
+                            public void run() {
                                 listener.onPaused(done, total);
-                            } else {
+                            }
+                        });
+                    } else {
+                        // 真失败：任务作废
+                        state = State.IDLE;
+                        release = null;
+                        ui.post(new Runnable() {
+                            @Override
+                            public void run() {
                                 listener.onFailed(e.getMessage() == null ? "下载失败" : e.getMessage());
                             }
-                        }
-                    });
+                        });
+                    }
                 }
             }
         }, "pumpkin-download");
@@ -154,7 +181,9 @@ public final class Downloader {
 
     /** 暂停（保留已下载部分）。 */
     public void pause() {
-        pauseRequested = true;
+        if (state == State.RUNNING) {
+            pauseRequested = true;
+        }
     }
 
     /** 删除任务：停止下载，并把已经下载的文件全部清理掉。 */

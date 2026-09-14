@@ -817,8 +817,9 @@ public class MainActivity extends Activity {
                     ? "未选择要下载的版本"
                     : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
         }
-        installBtn.setText(selected != null && versions.isInstalled(selected.tag)
-                ? "重新下载" : "下载");
+        // 下载相关的按钮统一交给状态机刷新：这里如果再单独设一次，
+        // 就会每秒把「暂停 / 继续」覆盖回「下载」，造成按钮来回跳。
+        updateDownloadButtons();
         StringBuilder sb = new StringBuilder();
         sb.append("已安装 ").append(installed.size()).append(" 个版本");
         if (installed.size() > 1) {
@@ -1181,12 +1182,13 @@ public class MainActivity extends Activity {
 
     /** 下载按钮：一个按钮承担三态 —— 下载 → 暂停 → 继续。 */
     private void onDownloadButtonClicked() {
-        if (downloader.isRunning()) {
+        Downloader.State st = downloader.getState();
+        if (st == Downloader.State.RUNNING) {
             downloader.pause();
-            toast("正在暂停…");
+            downloadHint.setText("正在暂停…");
             return;
         }
-        if (downloader.hasTask()) {
+        if (st == Downloader.State.PAUSED) {
             if (downloadListener == null) {
                 return;
             }
@@ -1201,12 +1203,8 @@ public class MainActivity extends Activity {
 
     /** 删除下载任务：只有暂停状态下才允许，且会丢弃已下载的全部文件。 */
     private void onDeleteTaskClicked() {
-        if (downloader.isRunning()) {
-            toast("请先暂停下载");
-            return;
-        }
-        if (!downloader.hasTask()) {
-            toast("当前没有可删除的下载任务");
+        if (downloader.getState() != Downloader.State.PAUSED) {
+            toast("请先暂停下载，再删除任务");
             return;
         }
         confirm("删除下载任务会丢弃已经下载的部分，确定吗？", new Runnable() {
@@ -1223,14 +1221,18 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** 按下载状态刷新按钮：下载按钮三态，「删除下载任务」只在暂停后可用。 */
+    /**
+     * 界面按钮完全由 Downloader 的状态推导（单一状态源，别处不要再改这些按钮文字）：
+     *   IDLE    → 「下载」，删除任务不可点
+     *   RUNNING → 「暂停」，删除任务不可点（必须先暂停）
+     *   PAUSED  → 「继续」，删除任务可点
+     */
     private void updateDownloadButtons() {
-        boolean running = downloader.isRunning();
-        boolean paused = downloader.hasTask() && !running;
-        if (running) {
+        Downloader.State st = downloader.getState();
+        if (st == Downloader.State.RUNNING) {
             installBtn.setText("暂停");
             installBtn.setEnabled(true);
-        } else if (paused) {
+        } else if (st == Downloader.State.PAUSED) {
             installBtn.setText("继续");
             installBtn.setEnabled(true);
         } else {
@@ -1238,8 +1240,8 @@ public class MainActivity extends Activity {
                     ? "重新下载" : "下载");
             installBtn.setEnabled(selected != null);
         }
-        deleteTaskBtn.setEnabled(paused);   // 只有暂停后才亮，避免误删
-        checkBtn.setEnabled(!running);
+        deleteTaskBtn.setEnabled(st == Downloader.State.PAUSED);
+        checkBtn.setEnabled(st != Downloader.State.RUNNING);
     }
 
     private void finishBusy() {
