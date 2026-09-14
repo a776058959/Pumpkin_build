@@ -10,7 +10,8 @@ android {
 
     defaultConfig {
         applicationId = "com.pumpkin.server"
-        minSdk = 24
+        // miuix 0.9.3 + Compose 1.12 要求 minSdk 26；本壳自用侧载，无实际影响
+        minSdk = 26
         // 关键：必须 <= 28。Android 10+ 只在 targetSdk <= 28 时把应用放进 untrusted_app_27 域，
         // 该域允许对应用私有目录里的文件 execve；>= 29 会被 SELinux 拒绝，
         // 那样就无法运行「在线下载」的服务端二进制。
