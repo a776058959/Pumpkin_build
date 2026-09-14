@@ -151,12 +151,29 @@ public class MainActivity extends Activity {
         contentArea.addView(pageUpdate);
         contentArea.addView(pageSettings);
 
-        // 毛玻璃层：与导航栏同位置同尺寸，显示「导航栏背后的模糊内容」
+        // 毛玻璃层：与导航栏同位置同尺寸，显示「导航栏背后的模糊内容」。
+        // 注意：没有图片的 ImageView 高度是 0，必须先给一个高度，等导航栏测量完再同步真实高度，
+        // 否则 BlurBackdrop 会因为取不到尺寸而永远不绘制。
         navBlur = new ImageView(this);
         navBlur.setScaleType(ImageView.ScaleType.FIT_XY);
-        root.addView(navBlur, navParams());
+        FrameLayout.LayoutParams blurParams = navParams();
+        blurParams.height = UiKit.dp(this, 76);
+        root.addView(navBlur, blurParams);
 
-        root.addView(buildBottomNav(), navParams());
+        View nav = buildBottomNav();
+        root.addView(nav, navParams());
+        nav.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                                       int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                int h = bottom - top;
+                if (h > 0 && navBlur.getHeight() != h) {
+                    ViewGroup.LayoutParams p = navBlur.getLayoutParams();
+                    p.height = h;
+                    navBlur.setLayoutParams(p);
+                }
+            }
+        });
 
         backdrop = new BlurBackdrop(contentArea, navBlur);
 
