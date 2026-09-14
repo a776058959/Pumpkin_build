@@ -10,7 +10,10 @@ android {
 
     defaultConfig {
         applicationId = "com.pumpkin.server"
-        // miuix 0.9.3 + Compose 1.12 要求 minSdk 26；本壳自用侧载，无实际影响
+        // miuix-ui / icons / preference / shader 等模块自身只要求 minSdk 23；
+        // 唯独 miuix-blur-android 在 manifest 里声明 minSdkVersion 33（液态玻璃折射用 API 33 RuntimeShader）。
+        // 我们在 AndroidManifest.xml 用 tools:overrideLibrary 放开这一条检查（KernelSU 同款做法，
+        // 它 minSdk 31 也是这么用 miuix-blur 的），< 33 的设备上模糊自动降级到软件回退实现。
         minSdk = 26
         // 关键：必须 <= 28。Android 10+ 只在 targetSdk <= 28 时把应用放进 untrusted_app_27 域，
         // 该域允许对应用私有目录里的文件 execve；>= 29 会被 SELinux 拒绝，

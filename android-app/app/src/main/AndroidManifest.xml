@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- miuix-blur 的 AAR 在 manifest 里声明 minSdkVersion 33（液态玻璃折射走 API 33 的 RuntimeShader），
+         而本壳要保持 minSdk 26 / targetSdk 28（28 是 execve 豁免红线，不能动）。
+         用 overrideLibrary 只放开这一个库的 minSdk 校验（KernelSU minSdk 31 也是这么用它的）；
+         API < 33 的设备上模糊会降级到软件回退实现，不会崩。 -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
