@@ -1,7 +1,6 @@
 package com.pumpkin.server;
 
 import android.Manifest;
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -40,6 +39,8 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
+import androidx.activity.ComponentActivity;
+
 /**
  * 轻壳主界面：底部悬浮玻璃导航栏 + 三个页面（运行 / 更新 / 设置）。
  * 壳本身不含服务端，联网从 Releases 下载、切换、回滚、清理版本。
@@ -47,7 +48,7 @@ import java.util.List;
  * 界面已由 Java View 迁移到 Compose（见 ui 包），本类保留全部业务逻辑，
  * 并实现 {@link com.pumpkin.server.ui.PumpkinActions} 作为 Compose 的动作出口。
  */
-public class MainActivity extends Activity implements com.pumpkin.server.ui.PumpkinActions {
+public class MainActivity extends ComponentActivity implements com.pumpkin.server.ui.PumpkinActions {
 
     private static final int REQ_NOTIFICATIONS = 1;
     private static final int PAGE_RUN = 0;
@@ -59,72 +60,27 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
     private VersionManager versions;
     private UpdateClient updates;
 
-    // 页面容器与导航
-    private View pageRun;
-    private View pageUpdate;
-    private View pageSettings;
-    private View navIndicator;
-    private ViewGroup navRow;
-    private int currentPage = 0;
-    private final TextView[] tabIcons = new TextView[3];
-    private final TextView[] tabLabels = new TextView[3];
-    private FrameLayout contentArea;
-    private BlurBackdropView navBlur;
-    private BlurBackdrop backdrop;
-    /** 悬浮栏的液态玻璃背景：接收倾斜数据让高光流动。 */
-    private GlassPanelDrawable navGlass;
-    private TiltGlow tiltGlow;
-
-    // 运行页
-    private TextView statusDot;
-    private TextView statusText;
-    private TextView addrText;
-    private TextView dirText;
-    private TextView logView;
-    private ScrollView logScroll;
-    private EditText cmdInput;
+    /**
+     * Compose UI 的可观察状态。
+     *
+     * 这是「Java 业务 → Compose 界面」的唯一通道：原来 setText 的地方改成写这里，
+     * Compose 侧读状态自动重组。界面本身全在 ui 包里，本类不再持有任何 View。
+     */
+    private com.pumpkin.server.ui.PumpkinUiState state;
 
     // 更新页
-    private TextView versionCurrent;
-    private TextView versionSelected;
-    private TextView versionInstalled;
-    private TextView versionHint;
-    private ProgressBar progress;
-    private Button installBtn;
-    private Button checkBtn;
-    private Button deleteTaskBtn;
-    private TextView downloadHint;
-    private TextView localCount;
-    private View dotView;
     private Downloader downloader;
     private Downloader.Listener downloadListener;
-
-    // 设置页
-    private TextView modeValue;
-    private EditText apiInput;
-    private EditText repoInput;
-    private EditText mirrorInput;
 
     private final List<UpdateClient.Release> available = new ArrayList<>();
     private UpdateClient.Release selected;
     private volatile boolean busy;
     private volatile boolean cancelRequested;
 
-    /**
-     * Compose UI 的可观察状态。
-     *
-     * 说明：这是「Java 业务 → Compose 界面」的唯一通道。业务方法本身一行没改，
-     * 只是把原来 setText 的地方改成写这里，Compose 侧读状态自动重组。
-     */
-    private com.pumpkin.server.ui.PumpkinUiState state;
-
     private final Runnable ticker = new Runnable() {
         @Override
         public void run() {
             refresh();
-            if (backdrop != null) {
-                backdrop.refresh();
-            }
             ui.postDelayed(this, 1000);
         }
     };
@@ -138,10 +94,15 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         updates = new UpdateClient(this);
         downloader = new Downloader(this);
         state = new com.pumpkin.server.ui.PumpkinUiState();
-        View root = buildUi();
-        setContentView(root);
-        applyInsets(root);
-        switchPage(PAGE_RUN);
+        // 界面交给 Compose：三页 + 液态玻璃底栏都在 ui 包里。
+        // setContent 必须由 Kotlin 侧调用（@Composable lambda 带 $composer 参数，Java 造不出来）。
+        com.pumpkin.server.ui.PumpkinUiBridge.launchPumpkinUi(this, state, this);
+        // insets 仍由这里统一处理（沿用原来那套 legacy systemUiVisibility + setPadding），
+        // 不引入 API 30 的新接口 —— 新接口历史上会导致本应用启动即崩。
+        View content = findViewById(android.R.id.content);
+        if (content != null) {
+            applyInsets(content);
+        }
         requestNotificationPermissionIfNeeded();
         autoCheckForUpdate();
         ui.post(ticker);
@@ -229,27 +190,15 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         super.onResume();
         ui.removeCallbacks(ticker);
         ui.post(ticker);
-        // 液态玻璃的高光随倾斜流动：回到前台才开传感器，退后台立刻注销
-        if (tiltGlow == null && navGlass != null) {
-            tiltGlow = TiltGlow.start(this, new TiltGlow.Listener() {
-                @Override
-                public void onTilt(float x, float y) {
-                    if (navGlass != null) {
-                        navGlass.setTilt(x, y);
-                    }
-                }
-            });
-        }
+        // 倾斜高光由 miuix 的 rememberDeviceTilt 在 Compose 侧自理（见 LiquidGlassNavBar），
+        // 这里不再需要自己开关传感器。
+        refresh();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         ui.removeCallbacks(ticker);
-        if (tiltGlow != null) {
-            tiltGlow.stop();
-            tiltGlow = null;
-        }
     }
 
     @Override
@@ -259,409 +208,6 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         if (downloader != null && downloader.isRunning()) {
             downloader.pause();   // 退到后台时暂停，保留断点，下次可继续
         }
-        if (backdrop != null) {
-            backdrop.release();
-        }
-    }
-
-    // ================================================================ 整体布局
-
-    private View buildUi() {
-        FrameLayout root = new FrameLayout(this);
-        root.setBackground(UiKit.windowBackground(this));
-
-        contentArea = new FrameLayout(this);
-        // 关键：内容区**不设**底部内边距，让内容一直延伸到悬浮导航栏下面。
-        // 否则导航栏背后是一片纯色留白，模糊纯色还是纯色，看着就跟不透明一样。
-        contentArea.setBackground(UiKit.windowBackground(this));
-        root.addView(contentArea, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        pageRun = buildRunPage();
-        pageUpdate = buildUpdatePage();
-        pageSettings = buildSettingsPage();
-        contentArea.addView(pageRun);
-        contentArea.addView(pageUpdate);
-        contentArea.addView(pageSettings);
-
-        // 毛玻璃层：与导航栏同位置同尺寸，显示「导航栏背后的模糊内容」。
-        // 注意：没有图片的 ImageView 高度是 0，必须先给一个高度，等导航栏测量完再同步真实高度，
-        // 否则 BlurBackdrop 会因为取不到尺寸而永远不绘制。
-        navBlur = new BlurBackdropView(this);
-        // 关键：模糊层也必须圆角。它垫在悬浮栏后面，如果保持直角矩形，
-        // 悬浮栏圆角「缺掉」的那四块就会露出方形模糊内容（看起来就是圆角坏了）。
-        GradientDrawable blurShape = new GradientDrawable();
-        blurShape.setColor(0x00000000);
-        blurShape.setCornerRadius(UiKit.dp(this, 26));
-        navBlur.setBackground(blurShape);
-        navBlur.setClipToOutline(true);
-        FrameLayout.LayoutParams blurParams = navParams();
-        blurParams.height = UiKit.dp(this, 76);
-        root.addView(navBlur, blurParams);
-
-        View nav = buildBottomNav();
-        root.addView(nav, navParams());
-        nav.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
-            @Override
-            public void onLayoutChange(View v, int left, int top, int right, int bottom,
-                                       int oldLeft, int oldTop, int oldRight, int oldBottom) {
-                int h = bottom - top;
-                if (h > 0 && navBlur.getHeight() != h) {
-                    ViewGroup.LayoutParams p = navBlur.getLayoutParams();
-                    p.height = h;
-                    navBlur.setLayoutParams(p);
-                }
-            }
-        });
-
-        backdrop = new BlurBackdrop(contentArea, navBlur);
-
-        return root;
-    }
-
-    private FrameLayout.LayoutParams navParams() {
-        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM);
-        p.setMargins(UiKit.dp(this, 18), 0, UiKit.dp(this, 18), UiKit.dp(this, 18));
-        return p;
-    }
-
-    private ScrollView pageContainer() {
-        ScrollView sv = new ScrollView(this);
-        sv.setFillViewport(true);
-        // 滚动过程中立刻刷新背后的毛玻璃，否则模糊层会滞留在上一帧内容上（观感就是"延迟"）。
-        sv.setOnScrollChangeListener(new View.OnScrollChangeListener() {
-            @Override
-            public void onScrollChange(View v, int scrollX, int scrollY,
-                                       int oldScrollX, int oldScrollY) {
-                if (backdrop != null) {
-                    backdrop.refresh();
-                }
-            }
-        });
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        int pad = UiKit.dp(this, 16);
-        // 底部留出足够空间：内容可以滚到悬浮导航栏下面（这样才有东西可模糊），
-        // 同时最后一项不会被挡住。
-        col.setPadding(pad, UiKit.dp(this, 26), pad, UiKit.dp(this, 112));
-        sv.addView(col, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        sv.setTag(col);
-        return sv;
-    }
-
-    private static LinearLayout columnOf(ScrollView sv) {
-        return (LinearLayout) sv.getTag();
-    }
-
-    // ---------------------------------------------------------------- 运行页
-
-    private View buildRunPage() {
-        ScrollView sv = pageContainer();
-        LinearLayout col = columnOf(sv);
-
-        col.addView(UiKit.header(this, "Pumpkin", "Rust 版 Minecraft 服务端"));
-
-        LinearLayout statusCard = UiKit.card(this);
-        statusDot = new TextView(this);
-        statusText = new TextView(this);
-        statusCard.addView(UiKit.statusRow(this, statusDot, statusText));
-
-        addrText = UiKit.value(this, "");
-        addrText.setTextSize(15);
-        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ap.topMargin = UiKit.dp(this, 12);
-        addrText.setLayoutParams(ap);
-        statusCard.addView(addrText);
-
-        dirText = UiKit.label(this, "");
-        statusCard.addView(dirText);
-
-        Button startBtn = UiKit.button(this, "启动", true);
-        Button stopBtn = UiKit.button(this, "停止", false);
-        statusCard.addView(UiKit.buttonRow(this, startBtn, stopBtn));
-
-        Button battBtn = UiKit.button(this, "电池优化", false);
-        Button copyBtn = UiKit.button(this, "复制地址", false);
-        statusCard.addView(UiKit.buttonRow(this, battBtn, copyBtn));
-
-        // 用哪个版本运行，属于「运行」的事，所以放在这一页
-        Button switchBtn = UiKit.button(this, "选择运行版本", false);
-        statusCard.addView(UiKit.buttonRow(this, switchBtn));
-        col.addView(statusCard);
-
-        LinearLayout consoleCard = UiKit.card(this);
-        consoleCard.addView(UiKit.cardTitle(this, "控制台"));
-
-        logScroll = new ScrollView(this);
-        logView = new TextView(this);
-        logView.setTextSize(10.5f);
-        logView.setTypeface(Typeface.MONOSPACE);
-        logView.setTextColor(0xFFCFD6E4);
-        logView.setTextIsSelectable(true);
-        logScroll.addView(logView);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, UiKit.dp(this, 260));
-        lp.topMargin = UiKit.dp(this, 10);
-        logScroll.setLayoutParams(lp);
-        logScroll.setBackground(UiKit.glass(this, false));
-        logScroll.setPadding(UiKit.dp(this, 10), UiKit.dp(this, 10),
-                UiKit.dp(this, 10), UiKit.dp(this, 10));
-        consoleCard.addView(logScroll);
-
-        LinearLayout cmdRow = new LinearLayout(this);
-        cmdRow.setOrientation(LinearLayout.HORIZONTAL);
-        cmdRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cp.topMargin = UiKit.dp(this, 12);
-        cmdRow.setLayoutParams(cp);
-
-        cmdInput = new EditText(this);
-        cmdInput.setHint("命令：list / op 玩家名 / stop");
-        styleInput(cmdInput);
-        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        ip.rightMargin = UiKit.dp(this, 8);
-        cmdRow.addView(cmdInput, ip);
-
-        Button sendBtn = UiKit.button(this, "发送", true);
-        cmdRow.addView(sendBtn);
-        consoleCard.addView(cmdRow);
-        col.addView(consoleCard);
-
-        startBtn.setOnClickListener(v -> startServer());
-        stopBtn.setOnClickListener(v -> stopServer());
-        battBtn.setOnClickListener(v -> openBatterySettings());
-        copyBtn.setOnClickListener(v -> copyAddress());
-        switchBtn.setOnClickListener(v -> showSwitchDialog());
-        sendBtn.setOnClickListener(v -> sendCommand());
-
-        return sv;
-    }
-
-    // ---------------------------------------------------------------- 更新页
-
-    private View buildUpdatePage() {
-        ScrollView sv = pageContainer();
-        LinearLayout col = columnOf(sv);
-
-        col.addView(UiKit.header(this, "服务端版本", "检查 · 下载 · 清理"));
-
-        // ==================== ① 版本信息 ====================
-        LinearLayout infoCard = UiKit.card(this);
-        infoCard.addView(UiKit.cardTitle(this, "当前版本"));
-
-        versionCurrent = UiKit.value(this, "");
-        versionCurrent.setTextSize(16);
-        versionCurrent.setTypeface(Typeface.DEFAULT_BOLD);
-        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        vp.topMargin = UiKit.dp(this, 10);
-        versionCurrent.setLayoutParams(vp);
-        infoCard.addView(versionCurrent);
-
-        versionInstalled = UiKit.label(this, "");
-        infoCard.addView(versionInstalled);
-
-        versionSelected = UiKit.value(this, "");
-        versionSelected.setTextSize(15);
-        versionSelected.setTypeface(Typeface.DEFAULT_BOLD);
-        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        slp.topMargin = UiKit.dp(this, 12);
-        versionSelected.setLayoutParams(slp);
-        infoCard.addView(versionSelected);
-
-        versionHint = UiKit.label(this, "");
-        infoCard.addView(versionHint);
-
-        checkBtn = UiKit.button(this, "检查更新", false);
-        Button pickBtn = UiKit.button(this, "选择版本", false);
-        infoCard.addView(UiKit.buttonRow(this, checkBtn, pickBtn));
-        col.addView(infoCard);
-
-        // ==================== ② 下载（独立一块） ====================
-        LinearLayout dlCard = UiKit.card(this);
-        dlCard.addView(UiKit.cardTitle(this, "下载"));
-
-        downloadHint = UiKit.label(this,
-                "点「下载」开始。下载中按钮会变成「暂停」，暂停后才能删除下载任务。");
-        dlCard.addView(downloadHint);
-
-        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progress.setMax(1000);
-        progress.setVisibility(View.GONE);
-        progress.setProgressTintList(ColorStateList.valueOf(UiKit.ACCENT));
-        progress.setProgressBackgroundTintList(ColorStateList.valueOf(0x33FFFFFF));
-        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, UiKit.dp(this, 6));
-        pp.topMargin = UiKit.dp(this, 12);
-        progress.setLayoutParams(pp);
-        dlCard.addView(progress);
-
-        // 一个按钮承担三态：下载 → 暂停 → 继续
-        installBtn = UiKit.button(this, "下载", true);
-        installBtn.setEnabled(false);
-        dlCard.addView(UiKit.buttonRow(this, installBtn));
-
-        deleteTaskBtn = UiKit.button(this, "删除下载任务", false);
-        deleteTaskBtn.setEnabled(false);
-        dlCard.addView(UiKit.buttonRow(this, deleteTaskBtn));
-        col.addView(dlCard);
-
-        // ==================== ③ 本地版本（独立一块） ====================
-        LinearLayout localCard = UiKit.card(this);
-        localCard.addView(UiKit.cardTitle(this, "本地版本"));
-        localCount = UiKit.label(this, "");
-        localCard.addView(localCount);
-        Button deleteBtn = UiKit.button(this, "删除已安装的版本", false);
-        localCard.addView(UiKit.buttonRow(this, deleteBtn));
-        col.addView(localCard);
-
-        checkBtn.setOnClickListener(v -> doCheck());
-        pickBtn.setOnClickListener(v -> showVersionPicker());
-        installBtn.setOnClickListener(v -> onDownloadButtonClicked());
-        deleteTaskBtn.setOnClickListener(v -> onDeleteTaskClicked());
-        deleteBtn.setOnClickListener(v -> showDeleteDialog(versions.listInstalled()));
-
-        return sv;
-    }
-
-    // ---------------------------------------------------------------- 设置页
-
-    private View buildSettingsPage() {
-        ScrollView sv = pageContainer();
-        LinearLayout col = columnOf(sv);
-
-        col.addView(UiKit.header(this, "设置", "启动方式 / 下载源 / 数据清理"));
-
-        // 启动方式
-        LinearLayout modeCard = UiKit.card(this);
-        modeCard.addView(UiKit.cardTitle(this, "服务端启动方式"));
-        modeValue = UiKit.value(this, "");
-        modeCard.addView(modeValue);
-        modeCard.addView(UiKit.label(this,
-                "普通模式开箱即用。若启动时报权限错误，切到 Root 模式再试。"));
-        Button modeBtn = UiKit.button(this, "切换启动方式", false);
-        modeCard.addView(UiKit.buttonRow(this, modeBtn));
-        col.addView(modeCard);
-
-        // 下载源
-        LinearLayout srcCard = UiKit.card(this);
-        srcCard.addView(UiKit.cardTitle(this, "下载源"));
-        srcCard.addView(UiKit.label(this,
-                "平时不用改。下载失败时会自动换源，这里可手动指定。"));
-
-        apiInput = new EditText(this);
-        apiInput.setHint("API 地址，如 https://api.github.com");
-        apiInput.setText(UpdateClient.apiBase(this));
-        styleInput(apiInput);
-        srcCard.addView(apiInput);
-
-        repoInput = new EditText(this);
-        repoInput.setHint("仓库，如 owner/repo");
-        repoInput.setText(UpdateClient.repo(this));
-        styleInput(repoInput);
-        srcCard.addView(repoInput);
-
-        mirrorInput = new EditText(this);
-        mirrorInput.setHint("下载镜像前缀（可留空）");
-        mirrorInput.setText(Prefs.get(this, "download_mirror", ""));
-        styleInput(mirrorInput);
-        srcCard.addView(mirrorInput);
-
-        Button saveSrcBtn = UiKit.button(this, "保存下载源", true);
-        srcCard.addView(UiKit.buttonRow(this, saveSrcBtn));
-        col.addView(srcCard);
-
-        // 清理
-        LinearLayout cleanCard = UiKit.card(this);
-        cleanCard.addView(UiKit.cardTitle(this, "清理数据"));
-        Button cleanVerBtn = UiKit.button(this, "清服务端版本", false);
-        Button cleanDataBtn = UiKit.button(this, "清游戏数据", false);
-        cleanCard.addView(UiKit.buttonRow(this, cleanVerBtn, cleanDataBtn));
-        Button cleanAllBtn = UiKit.button(this, "全部清空", false);
-        cleanCard.addView(UiKit.buttonRow(this, cleanAllBtn));
-        col.addView(cleanCard);
-
-        // 关于
-        LinearLayout aboutCard = UiKit.card(this);
-        aboutCard.addView(UiKit.cardTitle(this, "关于"));
-        aboutCard.addView(UiKit.value(this, "版本 " + versionName()));
-        Button checkShellBtn = UiKit.button(this, "检查更新", false);
-        aboutCard.addView(UiKit.buttonRow(this, checkShellBtn));
-        Button battBtn2 = UiKit.button(this, "电池优化设置", false);
-        Button dirBtn = UiKit.button(this, "数据目录路径", false);
-        aboutCard.addView(UiKit.buttonRow(this, battBtn2, dirBtn));
-        col.addView(aboutCard);
-
-        modeBtn.setOnClickListener(v -> showModeDialog());
-        saveSrcBtn.setOnClickListener(v -> saveSource());
-        cleanVerBtn.setOnClickListener(v -> confirm("确定删除所有已下载的服务端版本吗？游戏数据会保留。", new Runnable() {
-            @Override
-            public void run() {
-                if (PumpkinServer.get().isRunning()) {
-                    toast("请先停止服务端");
-                    return;
-                }
-                versions.clearAllVersions();
-                selected = null;
-                available.clear();
-                toast("已清理服务端版本");
-                refresh();
-            }
-        }));
-        cleanDataBtn.setOnClickListener(v -> confirm("确定删除世界存档、配置和日志吗？此操作不可恢复。", new Runnable() {
-            @Override
-            public void run() {
-                if (PumpkinServer.get().isRunning()) {
-                    toast("请先停止服务端");
-                    return;
-                }
-                VersionManager.clearServerData(MainActivity.this);
-                toast("已清理游戏数据");
-                refresh();
-            }
-        }));
-        cleanAllBtn.setOnClickListener(v -> confirm("确定清空全部数据吗？包括所有服务端版本和世界存档，不可恢复。", new Runnable() {
-            @Override
-            public void run() {
-                if (PumpkinServer.get().isRunning()) {
-                    toast("请先停止服务端");
-                    return;
-                }
-                versions.clearAllVersions();
-                VersionManager.clearServerData(MainActivity.this);
-                selected = null;
-                available.clear();
-                toast("已全部清空");
-                refresh();
-            }
-        }));
-        battBtn2.setOnClickListener(v -> openBatterySettings());
-        dirBtn.setOnClickListener(v -> copyWorkDir());
-        checkShellBtn.setOnClickListener(v -> checkShellUpdate());
-
-        return sv;
-    }
-
-    private void styleInput(EditText et) {
-        et.setHintTextColor(UiKit.TEXT_DIM);
-        et.setTextColor(UiKit.TEXT);
-        et.setTextSize(13.5f);
-        et.setSingleLine(true);
-        et.setInputType(InputType.TYPE_CLASS_TEXT);
-        et.setBackground(UiKit.glass(this, false));
-        et.setPadding(UiKit.dp(this, 14), UiKit.dp(this, 10),
-                UiKit.dp(this, 14), UiKit.dp(this, 10));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = UiKit.dp(this, 10);
-        et.setLayoutParams(lp);
     }
 
     private String versionName() {
@@ -672,233 +218,26 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         }
     }
 
-    // ---------------------------------------------------------------- 底部导航
-
-    private View buildBottomNav() {
-        FrameLayout nav = new FrameLayout(this);
-        navGlass = UiKit.glassPanel(this, true, true);
-        nav.setBackground(navGlass);
-        nav.setElevation(UiKit.dp(this, 10));
-
-        // 选中指示器：垫在三个 tab 下面，切换页面时平滑滑过去（而不是瞬间跳）
-        navIndicator = new View(this);
-        navIndicator.setBackground(UiKit.navPill(this, true));
-        navIndicator.setElevation(UiKit.dp(this, 2));
-        nav.addView(navIndicator, new FrameLayout.LayoutParams(
-                UiKit.dp(this, 64), ViewGroup.LayoutParams.MATCH_PARENT));
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        navRow = row;
-
-        String[] icons = new String[]{"▶", "⤓", "⚙"};
-        String[] labels = new String[]{"运行", "更新", "设置"};
-        int px = UiKit.dp(this, 8);
-        int py = UiKit.dp(this, 9);
-        for (int i = 0; i < 3; i++) {
-            final int index = i;
-            LinearLayout tab = new LinearLayout(this);
-            tab.setOrientation(LinearLayout.VERTICAL);
-            tab.setGravity(Gravity.CENTER);
-            tab.setPadding(px, py, px, py);
-
-            TextView icon = new TextView(this);
-            icon.setText(icons[i]);
-            icon.setTextSize(18);
-            icon.setGravity(Gravity.CENTER);
-
-            // 图标右上角挂一个小红点：有新版本时才亮，平时隐藏，不占地方也不打扰
-            FrameLayout iconBox = new FrameLayout(this);
-            iconBox.addView(icon, new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                    Gravity.CENTER));
-            if (i == 1) {
-                dotView = new View(this);
-                GradientDrawable dot = new GradientDrawable();
-                dot.setShape(GradientDrawable.OVAL);
-                dot.setColor(0xFFFF5C6C);
-                dot.setStroke(UiKit.dp(this, 1.5f), 0xCC141824);
-                dotView.setBackground(dot);
-                dotView.setVisibility(View.GONE);
-                iconBox.addView(dotView, new FrameLayout.LayoutParams(
-                        UiKit.dp(this, 9), UiKit.dp(this, 9), Gravity.TOP | Gravity.END));
-            }
-            tab.addView(iconBox, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-            TextView label = new TextView(this);
-            label.setText(labels[i]);
-            label.setTextSize(11.5f);
-            label.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            tlp.topMargin = UiKit.dp(this, 3);
-            tab.addView(label, tlp);
-
-            tabIcons[i] = icon;
-            tabLabels[i] = label;
-
-            tab.setOnClickListener(v -> switchPage(index));
-            row.addView(tab, new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        }
-        nav.addView(row, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        return nav;
-    }
-
-    /** 把选中指示器移到第 index 个 tab 上；宽高按 tab 实际尺寸算。 */
-    private void moveIndicator(final int index, final boolean animate) {
-        if (navIndicator == null || navRow == null) {
-            return;
-        }
-        if (navRow.getWidth() <= 0) {
-            navRow.post(new Runnable() {
-                @Override
-                public void run() {
-                    moveIndicator(index, false);
-                }
-            });
-            return;
-        }
-        float tabWidth = navRow.getWidth() / 3f;
-        // 小胶囊，只罩住图标那一行（SukiSU / Material 3 的做法）：
-        // 太宽会变成一块椭圆药丸，所以收紧到接近图标尺寸。
-        int pillW = Math.max(UiKit.dp(this, 38),
-                Math.min((int) (tabWidth * 0.56f), UiKit.dp(this, 52)));
-        int pillH = UiKit.dp(this, 32);
-        int topMargin = UiKit.dp(this, 6);
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) navIndicator.getLayoutParams();
-        if (lp.width != pillW || lp.height != pillH) {
-            lp.width = pillW;
-            lp.height = pillH;
-            lp.topMargin = topMargin;
-            navIndicator.setLayoutParams(lp);
-        }
-        float targetX = index * tabWidth + (tabWidth - pillW) / 2f;
-        navIndicator.animate().cancel();
-        if (animate) {
-            navIndicator.animate()
-                    .translationX(targetX)
-                    .setDuration(260)
-                    .setInterpolator(new DecelerateInterpolator())
-                    .start();
-        } else {
-            navIndicator.setTranslationX(targetX);
-        }
-    }
-
-    private void switchPage(int index) {
-        pageRun.setVisibility(index == PAGE_RUN ? View.VISIBLE : View.GONE);
-        pageUpdate.setVisibility(index == PAGE_UPDATE ? View.VISIBLE : View.GONE);
-        pageSettings.setVisibility(index == PAGE_SETTINGS ? View.VISIBLE : View.GONE);
-        for (int i = 0; i < 3; i++) {
-            boolean active = (i == index);
-            // 文字/图标：选中用白色加粗，未选中用暗色；指示器本身负责“选中块”
-            tabIcons[i].setTextColor(active ? Color.WHITE : UiKit.TEXT_DIM);
-            tabLabels[i].setTextColor(active ? Color.WHITE : UiKit.TEXT_DIM);
-            tabLabels[i].setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
-            tabIcons[i].animate()
-                    .scaleX(active ? 1.15f : 1f)
-                    .scaleY(active ? 1.15f : 1f)
-                    .setDuration(180)
-                    .start();
-        }
-        moveIndicator(index, true);
-        if (index == PAGE_UPDATE) {
-            updateUpdateDot(false);   // 进过更新页就把提醒收起来
-        }
-        if (index == PAGE_RUN) {
-            refresh();
-        }
-    }
-
     // ================================================================ 状态刷新
 
     private void refresh() {
-        PumpkinServer server = PumpkinServer.get();
-        boolean running = server.isRunning();
-
-        statusDot.setText("●");
-        statusDot.setTextColor(running ? UiKit.OK : UiKit.TEXT_DIM);
-        if (running) {
-            long secs = Math.max(0, (System.currentTimeMillis() - server.getStartedAt()) / 1000);
-            statusText.setText("运行中 " + (secs / 60) + ":" + String.format("%02d", secs % 60));
-        } else if (server.getExitCode() != Integer.MIN_VALUE) {
-            statusText.setText("已停止（退出码 " + server.getExitCode() + "）");
-        } else {
-            statusText.setText("未运行");
-        }
-
-        String lan = PumpkinServer.findLanIpv4();
-        addrText.setText(lan == null
-                ? "未检测到局域网 IP（确认已连上 WiFi）"
-                : "Java " + lan + ":25565　·　基岩 " + lan + ":19132");
-        dirText.setText("数据目录 " + ServerPaths.workDir(this).getAbsolutePath());
-
-        boolean rootMode = Prefs.getBool(this, "root_mode", false);
-        if (modeValue != null) {
-            modeValue.setText(rootMode ? "Root 模式（su，不改 SELinux）" : "普通模式（targetSdk 28 豁免）");
-        }
-        String cur = versions.currentTag();
-        List<VersionManager.Installed> installed = versions.listInstalled();
-        versionCurrent.setText(cur == null ? "尚未安装服务端" : cur);
-        if (versionSelected != null) {
-            versionSelected.setText(selected == null
-                    ? "未选择要下载的版本"
-                    : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
-        }
-        // 下载相关的按钮统一交给状态机刷新：这里如果再单独设一次，
-        // 就会每秒把「暂停 / 继续」覆盖回「下载」，造成按钮来回跳。
-        updateDownloadButtons();
-        StringBuilder sb = new StringBuilder();
-        sb.append("已安装 ").append(installed.size()).append(" 个版本");
-        if (installed.size() > 1) {
-            sb.append("（可回滚）");
-        }
-        sb.append("　占用 ").append(fmtSize(VersionManager.dirSize(versions.getVersionsDir())));
-        sb.append("\n游戏数据 ").append(fmtSize(VersionManager.dirSize(ServerPaths.workDir(this))));
-        versionInstalled.setText(sb.toString());
-        if (localCount != null) {
-            localCount.setText(installed.isEmpty()
-                    ? "还没有安装任何版本"
-                    : "已安装 " + installed.size() + " 个，可单独删除其中一个");
-        }
-
-        String text = server.tailLog();
-        String display = text.isEmpty() ? "（还没有日志）\n启动服务器后这里会实时输出" : text;
-        if (!display.contentEquals(logView.getText())) {
-            logView.setTextColor(text.isEmpty() ? UiKit.TEXT_DIM : 0xFFCFD6E4);
-            logView.setText(display);
-            logScroll.post(new Runnable() {
-                @Override
-                public void run() {
-                    logScroll.fullScroll(View.FOCUS_DOWN);
-                }
-            });
-        }
-
-        syncState();
-    }
-
-    // ================================================================ Compose 状态桥接
-
-    /**
-     * 把 Java 侧的业务状态推给 Compose 状态对象。
-     *
-     * 调用时机与 refresh() 一致（每秒一次 + 各动作后）。这里只读不写业务，
-     * 所以即使 Compose 界面还没启用也不会有副作用。
-     */
-    private void syncState() {
         com.pumpkin.server.ui.PumpkinUiState s = state;
         if (s == null) {
             return;
         }
         PumpkinServer server = PumpkinServer.get();
+        boolean running = server.isRunning();
 
-        s.setRunning(server.isRunning());
+        s.setRunning(running);
         s.setHasExitCode(server.getExitCode() != Integer.MIN_VALUE);
-        s.setStatusText(statusText.getText().toString());
+        if (running) {
+            long secs = Math.max(0, (System.currentTimeMillis() - server.getStartedAt()) / 1000);
+            s.setStatusText("运行中 " + (secs / 60) + ":" + String.format("%02d", secs % 60));
+        } else if (server.getExitCode() != Integer.MIN_VALUE) {
+            s.setStatusText("已停止（退出码 " + server.getExitCode() + "）");
+        } else {
+            s.setStatusText("未运行");
+        }
 
         String lan = PumpkinServer.findLanIpv4();
         s.setAddrText(lan == null
@@ -917,9 +256,22 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         s.setVersionSelected(selected == null
                 ? "未选择要下载的版本"
                 : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
-        s.setVersionHint(versionHint.getText().toString());
-        s.setVersionInstalled(versionInstalled.getText().toString());
-        s.setLocalCount(localCount == null ? "" : localCount.getText().toString());
+
+        // 下载相关的按钮统一交给状态机刷新：这里如果再单独设一次，
+        // 就会每秒把「暂停 / 继续」覆盖回「下载」，造成按钮来回跳。
+        updateDownloadButtons();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("已安装 ").append(installed.size()).append(" 个版本");
+        if (installed.size() > 1) {
+            sb.append("（可回滚）");
+        }
+        sb.append("　占用 ").append(fmtSize(VersionManager.dirSize(versions.getVersionsDir())));
+        sb.append("\n游戏数据 ").append(fmtSize(VersionManager.dirSize(ServerPaths.workDir(this))));
+        s.setVersionInstalled(sb.toString());
+        s.setLocalCount(installed.isEmpty()
+                ? "还没有安装任何版本"
+                : "已安装 " + installed.size() + " 个，可单独删除其中一个");
 
         s.getInstalledTags().clear();
         for (VersionManager.Installed v : installed) {
@@ -927,31 +279,9 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         }
 
         // 日志整段同步：Compose 侧只做展示，不做增量 diff，避免两边状态不一致。
-        s.setLogText(PumpkinServer.get().tailLog());
-
-        // 下载相关三态
-        Downloader.State st = downloader.getState();
-        s.setInstallButtonText(installBtn.getText().toString());
-        s.setInstallButtonEnabled(installBtn.isEnabled());
-        s.setDeleteTaskEnabled(deleteTaskBtn.isEnabled());
-        s.setCheckEnabled(checkBtn.isEnabled());
-        s.setDownloadProgressVisible(progress.getVisibility() == View.VISIBLE);
-        s.setDownloadProgress(progress.getProgress() / (float) progress.getMax());
-        s.setDownloadHint(downloadHint.getText().toString());
+        s.setLogText(server.tailLog());
 
         s.setShellVersion(versionName());
-        s.setShowUpdateDot(dotView != null && dotView.getVisibility() == View.VISIBLE);
-
-        // 设置页输入框：只在用户没在编辑时回填，否则会打断输入。
-        if (!apiInput.hasFocus()) {
-            s.setApiBase(apiInput.getText().toString());
-        }
-        if (!repoInput.hasFocus()) {
-            s.setRepo(repoInput.getText().toString());
-        }
-        if (!mirrorInput.hasFocus()) {
-            s.setMirror(mirrorInput.getText().toString());
-        }
     }
 
     // ---- 供 Compose 调用的桥接方法（都只是转调原有私有方法，业务逻辑不变） ----
@@ -1049,9 +379,6 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         // 用户手动选了源，就把「上次成功记住的源」清掉，
         // 否则它会排在手动选择前面，造成「选了不生效」的错觉。
         Prefs.put(this, "good_prefix", "");
-        if (mirrorInput != null) {
-            mirrorInput.setText(p);
-        }
         if (state != null) {
             state.setMirror(p);
         }
@@ -1148,12 +475,15 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
     }
 
     private void sendCommand() {
-        String cmd = cmdInput.getText().toString();
-        if (cmd.trim().isEmpty()) {
+        if (state == null) {
+            return;
+        }
+        String cmd = state.getCommand();
+        if (cmd == null || cmd.trim().isEmpty()) {
             return;
         }
         PumpkinServer.get().sendCommand(cmd);
-        cmdInput.setText("");
+        state.setCommand("");
         refresh();
     }
 
@@ -1192,11 +522,27 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
 
     // ================================================================ 设置页动作
 
+    /** 保存下载源（输入值来自 Compose 侧状态，原方法读 EditText）。 */
     private void saveSource() {
-        Prefs.put(this, "api_base", apiInput.getText().toString().trim());
-        Prefs.put(this, "repo", repoInput.getText().toString().trim());
-        Prefs.put(this, "download_mirror", mirrorInput.getText().toString().trim());
+        if (state == null) {
+            return;
+        }
+        Prefs.put(this, "api_base", state.getApiBase().trim());
+        Prefs.put(this, "repo", state.getRepo().trim());
+        Prefs.put(this, "download_mirror", state.getMirror().trim());
         toast("已保存下载源设置");
+    }
+
+    private void setCheckEnabled(boolean enabled) {
+        if (state != null) {
+            state.setCheckEnabled(enabled);
+        }
+    }
+
+    private void setInstallEnabled(boolean enabled) {
+        if (state != null) {
+            state.setInstallButtonEnabled(enabled);
+        }
     }
 
     private void showModeDialog() {
@@ -1245,13 +591,15 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
 
     /** 根据当前选中的版本刷新提示文案。 */
     private void updateVersionHint() {
-        if (versionSelected != null) {
-            versionSelected.setText(selected == null
-                    ? "未选择要下载的版本"
-                    : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
+        com.pumpkin.server.ui.PumpkinUiState s = state;
+        if (s == null) {
+            return;
         }
+        s.setVersionSelected(selected == null
+                ? "未选择要下载的版本"
+                : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
         if (selected == null) {
-            versionHint.setText("点「检查更新」获取可用版本列表");
+            s.setVersionHint("点「检查更新」获取可用版本列表");
             return;
         }
         String cur = versions.currentTag();
@@ -1263,7 +611,7 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         } else if (versions.isInstalled(selected.tag)) {
             sb.append("\n（该版本已下载，到「运行」页可切换启用）");
         }
-        versionHint.setText(sb.toString());
+        s.setVersionHint(sb.toString());
     }
 
     /** 选择要下载的版本（默认最新）。 */
@@ -1306,8 +654,8 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
             return;
         }
         busy = true;
-        checkBtn.setEnabled(false);
-        versionHint.setText("正在检查 " + UpdateClient.repo(this) + " 的 Releases …");
+        setCheckEnabled(false);
+        setVersionHint("正在检查 " + UpdateClient.repo(this) + " 的 Releases …");
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -1317,16 +665,16 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
                         @Override
                         public void run() {
                             busy = false;
-                            checkBtn.setEnabled(true);
+                            setCheckEnabled(true);
                             if (list.isEmpty()) {
-                                versionHint.setText("没有找到带 Android 二进制的 Release");
-                                installBtn.setEnabled(false);
+                                setVersionHint("没有找到带 Android 二进制的 Release");
+                                setInstallEnabled(false);
                                 return;
                             }
                             available.clear();
                             available.addAll(list);
                             selected = list.get(0);   // 默认选中最新
-                            installBtn.setEnabled(true);
+                            setInstallEnabled(true);
                             updateVersionHint();
                             refresh();
                         }
@@ -1336,8 +684,8 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
                         @Override
                         public void run() {
                             busy = false;
-                            checkBtn.setEnabled(true);
-                            versionHint.setText("检查失败：" + e.getMessage()
+                            setCheckEnabled(true);
+                            setVersionHint("检查失败：" + e.getMessage()
                                     + "\n可在「设置」页指定下载源");
                         }
                     });
@@ -1385,19 +733,18 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
             return;
         }
         busy = true;
-        progress.setVisibility(View.VISIBLE);
-        progress.setProgress(0);
-        downloadHint.setText("正在下载 " + release.tag + " …");
+        setProgress(0f, true);
+        setDownloadHint("正在下载 " + release.tag + " …");
 
         downloadListener = new Downloader.Listener() {
             @Override
             public void onProgress(long done, long total) {
                 if (total > 0) {
-                    progress.setProgress((int) (done * 1000 / total));
-                    downloadHint.setText("下载中 " + fmtSize(done) + " / " + fmtSize(total)
+                    setProgress(done / (float) total, true);
+                    setDownloadHint("下载中 " + fmtSize(done) + " / " + fmtSize(total)
                             + "（" + (done * 100 / total) + "%）");
                 } else {
-                    downloadHint.setText("下载中 " + fmtSize(done));
+                    setDownloadHint("下载中 " + fmtSize(done));
                 }
                 updateDownloadButtons();
             }
@@ -1405,7 +752,7 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
             @Override
             public void onSourceFailed(String url, String reason) {
                 String shortUrl = url.length() > 52 ? url.substring(0, 52) + "…" : url;
-                downloadHint.setText("这个下载源不可用，正在自动换源…\n" + shortUrl);
+                setDownloadHint("这个下载源不可用，正在自动换源…\n" + shortUrl);
             }
 
             @Override
@@ -1413,19 +760,19 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
                 try {
                     versions.install(release.tag, file);
                     finishBusy();
-                    downloadHint.setText("已安装 " + release.tag + "，到「运行」页启动或切换");
+                    setDownloadHint("已安装 " + release.tag + "，到「运行」页启动或切换");
                     toast("下载完成");
                     refresh();
                 } catch (Exception e) {
                     finishBusy();
-                    versionHint.setText("安装失败：" + e.getMessage());
+                    setVersionHint("安装失败：" + e.getMessage());
                 }
             }
 
             @Override
             public void onPaused(long done, long total) {
                 busy = false;
-                downloadHint.setText("已暂停 " + fmtSize(done)
+                setDownloadHint("已暂停 " + fmtSize(done)
                         + (total > 0 ? " / " + fmtSize(total) : "")
                         + "\n点「继续」接着下，或点「删除下载任务」丢弃");
                 updateDownloadButtons();
@@ -1434,7 +781,7 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
             @Override
             public void onFailed(String message) {
                 finishBusy();
-                downloadHint.setText("下载失败：" + message);
+                setDownloadHint("下载失败：" + message);
             }
         };
         downloader.start(release, downloadListener);
@@ -1446,7 +793,7 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         Downloader.State st = downloader.getState();
         if (st == Downloader.State.RUNNING) {
             downloader.pause();
-            downloadHint.setText("正在暂停…");
+            setDownloadHint("正在暂停…");
             return;
         }
         if (st == Downloader.State.PAUSED) {
@@ -1454,8 +801,8 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
                 return;
             }
             downloader.start(null, downloadListener);
-            progress.setVisibility(View.VISIBLE);
-            downloadHint.setText("正在继续下载…");
+            setProgress(state == null ? 0f : state.getDownloadProgress(), true);
+            setDownloadHint("正在继续下载…");
             updateDownloadButtons();
             return;
         }
@@ -1473,14 +820,35 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
             public void run() {
                 downloader.deleteTask();
                 busy = false;
-                progress.setProgress(0);
-                progress.setVisibility(View.GONE);
-                downloadHint.setText("下载任务已删除，已下载的文件已清理。");
+                setProgress(0f, false);
+                setDownloadHint("下载任务已删除，已下载的文件已清理。");
                 updateDownloadButtons();
                 refresh();
             }
         });
     }
+
+    // ---- 状态写入小工具：避免每处都判空 ----
+
+    private void setProgress(float value, boolean visible) {
+        if (state != null) {
+            state.setDownloadProgress(value);
+            state.setDownloadProgressVisible(visible);
+        }
+    }
+
+    private void setDownloadHint(String text) {
+        if (state != null) {
+            state.setDownloadHint(text);
+        }
+    }
+
+    private void setVersionHint(String text) {
+        if (state != null) {
+            state.setVersionHint(text);
+        }
+    }
+
 
     /**
      * 界面按钮完全由 Downloader 的状态推导（单一状态源，别处不要再改这些按钮文字）：
@@ -1489,25 +857,31 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
      *   PAUSED  → 「继续」，删除任务可点
      */
     private void updateDownloadButtons() {
+        com.pumpkin.server.ui.PumpkinUiState s = state;
         Downloader.State st = downloader.getState();
-        if (st == Downloader.State.RUNNING) {
-            installBtn.setText("暂停");
-            installBtn.setEnabled(true);
-        } else if (st == Downloader.State.PAUSED) {
-            installBtn.setText("继续");
-            installBtn.setEnabled(true);
-        } else {
-            installBtn.setText(selected != null && versions.isInstalled(selected.tag)
-                    ? "重新下载" : "下载");
-            installBtn.setEnabled(selected != null);
+        if (s == null) {
+            return;
         }
-        deleteTaskBtn.setEnabled(st == Downloader.State.PAUSED);
-        checkBtn.setEnabled(st != Downloader.State.RUNNING);
+        if (st == Downloader.State.RUNNING) {
+            s.setInstallButtonText("暂停");
+            s.setInstallButtonEnabled(true);
+        } else if (st == Downloader.State.PAUSED) {
+            s.setInstallButtonText("继续");
+            s.setInstallButtonEnabled(true);
+        } else {
+            s.setInstallButtonText(selected != null && versions.isInstalled(selected.tag)
+                    ? "重新下载" : "下载");
+            s.setInstallButtonEnabled(selected != null);
+        }
+        s.setDeleteTaskEnabled(st == Downloader.State.PAUSED);
+        s.setCheckEnabled(st != Downloader.State.RUNNING);
     }
 
     private void finishBusy() {
         busy = false;
-        progress.setVisibility(View.GONE);
+        if (state != null) {
+            state.setDownloadProgressVisible(false);
+        }
         updateDownloadButtons();
     }
 
@@ -1615,9 +989,22 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
         }, "auto-check").start();
     }
 
+    /** 切页：只改状态，Compose 侧据此显示对应页面并移动底栏指示器。 */
+    private void switchPage(int index) {
+        if (state == null || index < 0 || index > PAGE_SETTINGS) {
+            return;
+        }
+        state.setPage(index);
+        if (index == PAGE_UPDATE) {
+            updateUpdateDot(false);   // 进过更新页就把提醒收起来
+        }
+        refresh();
+    }
+
+    /** 更新页小红点（原 dotView）。 */
     private void updateUpdateDot(boolean show) {
-        if (dotView != null) {
-            dotView.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (state != null) {
+            state.setShowUpdateDot(show);
         }
     }
 
