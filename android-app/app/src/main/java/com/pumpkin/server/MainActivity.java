@@ -1108,7 +1108,6 @@ public class MainActivity extends Activity implements com.pumpkin.server.ui.Pump
             }
         });
     }
-}
 
     private static String fmtSize(long bytes) {
         if (bytes < 1024) {

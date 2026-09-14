@@ -304,9 +304,9 @@ fun LiquidGlassNavBar(
                             ),
                         )
                         .then(
-                            if (isBlurActive) {
+                            if (isBlurActive && backdrop != null) {
                                 Modifier.drawBackdrop(
-                                    backdrop = backdrop!!,
+                                    backdrop = backdrop,
                                     shape = { pillShape },
                                     effects = {
                                         vibrancy()
