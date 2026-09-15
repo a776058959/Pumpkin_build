@@ -1,4 +1,4 @@
-name: Build Pumpkin (upstream + shell APK)
+name: Build Pumpkin (upstream + App APK)
 
 on:
   workflow_dispatch:

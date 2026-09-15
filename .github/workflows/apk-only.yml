@@ -1,9 +1,20 @@
-name: Build Pumpkin shell APK
+name: Build Pumpkin App (APK only)
 
-# 只构建「南瓜坞」APK：里面**不含**服务端二进制，服务端由 App 运行时从本仓库 Releases 下载。
-# 改界面/逻辑后用这个，几十秒就能出包。
+# 只构建「南瓜坞」App 的 APK：里面**不含**服务端二进制，服务端由 App 运行时从本仓库 Releases 下载。
+# 改界面/逻辑后用这个，一分钟左右出包，不用重建 8 个平台的服务端。
+#
+# ⚠️ 默认**不发布 Release**，只产出 Actions artifact。
+#    这一点以前坑过：改完 UI 用这个 workflow 出包，改动只躺在 artifact 里，
+#    App 的「检查更新」永远查不到 —— 用户那边等于没更新，而本地 adb 装的是新的，
+#    于是「我这边是好的」。要发到用户手里，必须把下面的 publish 勾上（或走 build.yml）。
+
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: '发布成 Release（App 的「检查更新」才能看到这一版）'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -11,6 +22,10 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    outputs:
+      # 透出给 publish job：tag 与 APK 内嵌的 versionCode 必须来自同一个时间戳，
+      # 否则会出现「每次都提示有新版本、装完还提示」。
+      stamp: ${{ steps.stamp.outputs.utc }}
 
     steps:
       - name: Checkout
@@ -37,7 +52,7 @@ jobs:
         with:
           gradle-version: '9.7.1'
 
-      - name: Build shell APK
+      - name: Build App APK
         working-directory: android-app
         run: gradle assembleDebug --no-daemon --stacktrace -PbuildStamp=${{ steps.stamp.outputs.utc }}
 
@@ -46,11 +61,66 @@ jobs:
         run: |
           mkdir -p apk-out
           cp android-app/app/build/outputs/apk/debug/app-debug.apk \
-             "apk-out/pumpkin-shell-${{ steps.stamp.outputs.utc }}.apk"
+             "apk-out/pumpkin-app-${{ steps.stamp.outputs.utc }}.apk"
           ls -lh apk-out
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: pumpkin-shell-apk-${{ steps.stamp.outputs.utc }}
+          name: pumpkin-app-apk-${{ steps.stamp.outputs.utc }}
           path: apk-out/*.apk
+
+  # 发布：只有勾了 publish 才跑。
+  #
+  # 只改 App 时服务端二进制没变，没必要为了发个 Release 去重建 8 个平台的 Rust（那要一个多小时）。
+  # 代价是这个 Release 里只有 APK —— 这不影响功能：
+  #   - App 自更新按 `.apk` 扩展名找，能找到；
+  #   - 服务端版本列表只收带 `pumpkin-android-arm64-*` 的 Release（见 UpdateClient.fetchReleases），
+  #     所以这种「只有 APK」的发布不会污染服务端版本列表。
+  publish:
+    needs: apk
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: pumpkin-app-apk-${{ needs.apk.outputs.stamp }}
+          path: rel
+
+      - name: Rename to the canonical asset name
+        shell: bash
+        run: |
+          # Release 资产名必须是 pumpkin-shell.apk：文档里的永久链接就是
+          #   .../releases/latest/download/pumpkin-shell.apk
+          # 改了会让所有已发布的下载链接 404。名字里的 shell 是历史遗留，先留着。
+          cp rel/pumpkin-app-*.apk rel/pumpkin-shell.apk
+          ls -lh rel
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAMP: ${{ needs.apk.outputs.stamp }}
+        shell: bash
+        run: |
+          cat > notes.md <<'EOF'
+          ## 南瓜坞 App（仅 App 更新）
+
+          本次只更新 App，**服务端二进制没有变化**，所以这个 Release 只附带 APK。
+          服务端请从带 `pumpkin-android-arm64-*` 附件的 Release 获取，App 内「检查更新」也会自动找到。
+
+          ### 安装
+
+          - 覆盖安装即可，不用卸载、不会丢世界数据（签名与旧版一致）
+          - 或让 App 自己更新：设置页 →「检查更新」
+
+          EOF
+          echo "versionCode = \`$(echo "$STAMP" | tr -d '-')\`（由构建时间戳推导，与 tag 严格一致）" >> notes.md
+
+          gh release create "Custom-$STAMP" \
+            rel/pumpkin-shell.apk \
+            --title "Custom Build $STAMP" \
+            --notes-file notes.md
