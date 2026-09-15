@@ -35,9 +35,10 @@
 
 - App 已从**手写 Java View 整体迁移到 Compose + miuix**（SukiSU / 新版 LSPosed 同款风格）。
   液态玻璃悬浮底栏的全部动效跑通：按压缩放、拖拽、图标缩放、倾斜高光。
-- **6 套配色**可在设置里切换（`ui/PumpkinTheme.kt` 的 `PumpkinPalettes`）。
-  背景渐变 / 卡片底色 / 按钮 / 底栏选中态都跟着变，选择落盘在 `Prefs` 的 `palette`。
-  真机像素验证：卡片底色三套**精确匹配**，主按钮强调色精确匹配。
+- **配色是「色相 × 明暗」两条独立的轴**：7 套色相（蓝 / 绿 / 橙 / 粉 / 青 / 紫 / 中性）
+  × {深色, 浅色}，加上「跟随系统」共 14 种组合（`ui/PumpkinTheme.kt` 的 `PumpkinPalettes`）。
+  背景渐变 / 卡片底色 / 按钮 / 底栏选中态都跟着变，选择落盘在 `Prefs` 的 `palette` 与 `themeMode`。
+  真机像素验证：卡片底色与主按钮强调色**精确匹配**，浅色方案会把状态栏图标翻成深色。
 - **沉浸式已修**：状态栏与手势条那一条铺的是 App 自己的渐变，不再是系统色带。
   根因是给 `android.R.id.content` 加了 `setPadding`，露出窗口底色 `#303030`。
   现在 insets 由 Compose 算，详见 [ANDROID.md](../../ANDROID.md) 的「沉浸式界面」。
@@ -51,14 +52,18 @@
 - **两条流水线已分开**：`build.yml` 只构建/发布**服务端**（上游提交触发或手动），
   App 一律走 `apk-only.yml`（手动 + 勾 publish）。服务端 Release 不再带 APK，
   所以 `releases/latest/download/pumpkin-shell.apk` 不再可靠 —— 取 App 用 App 内「检查更新」。
-- **12 套配色**（9 深 + 3 亮）：新增 深紫暮色 / 墨绿深林 / 酒红微醺 / 晨雾白 / 暖米色 / 淡紫晨光。
-  每套的正文对比度 ≥ 7:1、次要文字与按钮文字 ≥ 4.5:1（本喵自己算的 WCAG，外派模型算错过 4 处）。
-  亮色方案会自动把状态栏图标翻成深色（`PumpkinPalettes.isLight`）。
-- **App 更新改为应用内下载 + 直接安装**：不再跳浏览器。下载进度在「关于」卡片里，
-  下完走 FileProvider 交给系统安装器。下载源默认「官方直连」，可在「关于」里改。
-- 最新已发布：`Custom-20260915-1039`（**release 包**，9.7MB）。
-  App 现在出的是 `assembleRelease` 而**不是** `assembleDebug` —— 这是性能关键，
-  详见下面的「底栏点击卡顿排查」。
+- **插件有了自己的一页 + 插件商店**（本轮）：底栏 4 项（运行 / 更新 / 插件 / 设置）。
+  商店索引与 dex 发布在**固定 tag `plugins`** 的 Release 里，App 复用
+  `UpdateClient` 的多源回退去拉 —— **装插件不需要 root、不需要存储权限**，
+  因为只是往自己的私有目录写文件。详见 [plugins.md](plugins.md)。
+  真机全流程验证：`tools/verify-plugin-crud.sh`（20 项断言全过）。
+- **本机可以构建了**（本轮）：以前每次改代码都要推 CI，现在
+  `tools/build-local.ps1` 一条命令出 APK + 插件 dex + 索引，产物与 CI 可复现
+  （同一个 dex 的 SHA256 相同）。CI 只在**发布**时才需要。详见 [local-build.md](local-build.md)。
+- App 更新改为应用内下载 + 直接安装：不再跳浏览器。下载进度在「更新」页，
+  下完走 FileProvider 交给系统安装器。下载源默认「官方直连」，可在设置里改。
+- 最新已发布：见 `releases/latest`。App 现在出的是 `assembleRelease` 而**不是**
+  `assembleDebug` —— 这是性能关键，详见下面的「底栏点击卡顿排查」。
 - **原生 Linux 可用**：在手机本机内核上跑真正的 Alpine（chroot），不是 Termux 那种用户态终端。
   脚本、实测结果与踩过的坑见 [tools/native-linux/](../../tools/native-linux/)。
 - 术语已统一：源码与文档里不再叫「壳」，一律叫「南瓜坞 / App」。
@@ -158,6 +163,16 @@ minSdk 24 安全；CI 编译一次通过。
   排查崩溃改用 App 自带的 `last_crash.txt`（`/sdcard/Android/data/com.pumpkin.server/files/`）；
   必要时请用户在开发者选项里打开日志开关。
 - ⚠️ 截屏前先 `input keyevent KEYCODE_WAKEUP`：**屏幕睡着时截出来是全黑**（踩过）
+- **点界面之前先看这份备忘**（都是实测踩出来的）：
+  - 底栏 4 项的中心 x = **193 / 424 / 655 / 887**，y ≈ **2278**（不是 2255）。
+  - `input tap` 打在底栏上**偶发被吃掉**（像是上一帧动画还没结束）。别紧接着点页面里的按钮——
+    那会点在上一页的空白处，很容易误判成「功能坏了」。用 `tools/goto-page.sh`，它会确认切过去了。
+  - 算坐标用 `tools/dump-ui.sh`（输出「文字 @ 中心坐标」）；
+    注意它按**子串**匹配，`刷新` 会同时命中状态文字和按钮，取第一行会点错。
+  - 复合命令（`su -c`、管道、重定向）一律**写成 `.sh` 推上去跑**，
+    拼在 `adb shell "..."` 里会被 PowerShell 和手机 sh 双重解释。
+  - 推上去的脚本先 `sed -i 's/\r$//'`（仓库是 CRLF，`\r` 会被当成命令的一部分）。
+  - App 是 **release 包（非 debuggable）**，`run-as` 用不了；读私有目录只能 `su -c`。
 
 ---
 
@@ -475,12 +490,17 @@ Box(
 
 ## 本机环境
 
-- **没有 Android SDK / 模拟器 / MSVC / JDK** → 编译只能在 CI 上做（apk-only 约 1 分钟）
+- ✅ **本机已经能构建了**（本轮装的，见 [local-build.md](local-build.md)）：
+  `D:\devtools` 下有 JDK 21 / JDK 17 / Gradle 9.7.1 / Android SDK，
+  `tools/build-local.ps1` 一条命令出 APK + 插件 dex + 索引。
+  **日常迭代别再推 CI**；CI 只用来发布。
+- 依然没有：模拟器、MSVC。
 - **真机调试已可用**：adb + 测试机（见上「真机调试速查」），UI 效果要靠真机截图验证
 - git 用 GitHub Desktop 自带的：
   `C:\Users\a7760\AppData\Local\GitHubDesktop\app-3.6.5\resources\app\git\cmd\git.exe`
 - GitHub token 在 `%TEMP%\gh_tok.txt`（GitHub Desktop OAuth token；scopes: repo, user, workflow）
-- 代理 `http://127.0.0.1:7897`（clash verge）：访问 GitHub 要设 `HTTPS_PROXY`/`HTTP_PROXY`；
+- 代理 `http://127.0.0.1:7897`（clash verge）：访问 GitHub / dl.google.com / api.adoptium.net
+  要设代理（`HTTPS_PROXY`、`curl --proxy`、`git -c http.proxy=`）；
   **访问国内 API（火山/智谱/硅基流动）要删掉代理变量**，否则可能不通
 - 新仓库**零 secret**（用内置 GITHUB_TOKEN），但**仓库设置里 Actions 默认权限必须是 write**
 - ⚠️ **文件沙箱**：会话工作目录通常是 `D:\GitHub\Pumpkin_sgx`，而源码在 `D:\Pumpkin_build`。
@@ -489,18 +509,19 @@ Box(
 
 ## 南瓜坞 App 当前功能
 
-- 三个页面 + 底部悬浮**液态玻璃**导航（实时背景模糊 + 边缘亮线 + 顶部光泽 + 倾斜流动高光 + 按压缩放/拖拽动效）
-- **6 套配色**可切换（星夜蓝 / 松林绿 / 落日渐晖 / 樱雾粉 / 深海青 / 石墨灰），
-  背景渐变、卡片底色、按钮、底栏选中态一起变
+- **四个页面**（运行 / 更新 / 插件 / 设置）+ 底部悬浮**液态玻璃**导航
+  （实时背景模糊 + 边缘亮线 + 顶部光泽 + 倾斜流动高光 + 按压缩放/拖拽动效）
+- **7 套色相 × 明暗**可切换，背景渐变、卡片底色、按钮、底栏选中态一起变
 - **沉浸式**：状态栏与手势条那一条铺的是 App 自己的背景渐变，不是系统色带
-- **运行页**：状态与运行时长、联机地址（Java/基岩）、启动/停止、电池优化、**选择运行版本**（切换/回滚）、控制台（实时日志 + 命令输入）
+- **运行页**：状态与运行时长、联机地址（Java/基岩）、启动/停止、电池优化、**选择运行版本**（切换/回滚）、控制台（实时日志 + 命令输入，字号可被插件覆盖）
 - **更新页**：三块独立卡片 —— 版本信息（检查更新/选择版本）、下载（三态按钮 + 进度条 + 删除下载任务）、本地版本（删除已安装版本）
-- **设置页**：启动方式切换、**配色**、加速源快选、下载源（API 地址/仓库/镜像前缀）、清除数据、关于（版本号 / 检查 App 更新 / 电池优化 / 数据目录）
+- **插件页**：插件商店（拉索引 / 一键安装 / 更新）、已安装（启用 / 停用 / 卸载 / 重新加载 / 日志）、插件设置（插件声明的设置项，控件由 App 渲染）。**全程不需要 root**
+- **设置页**：启动方式切换、**外观**（明暗 + 色相）、加速源快选、下载源（API 地址/仓库/镜像前缀）、清除数据、关于（版本号 / 检查 App 更新 / 电池优化 / 数据目录）
 - 所有弹窗都是 **miuix 风格**（`WindowDialog`），不用系统原生 `AlertDialog`
 - **双启动模式**：普通模式靠 targetSdk 28 豁免；Root 模式走 `su` 域（**不改 SELinux**，不会被检测软件发现）
 - **App 自更新**：查 Releases 里带 `.apk` 的最新发布，提示下载覆盖安装（版本号由构建时间戳推导）
 - **下载**：多源自动回退（直连 → 上次成功的 → 用户镜像 → ghfast.top → gh-proxy.com → ghproxy.net），
-  支持断点续传；安装前校验 ELF（aarch64）；失败自动重试
+  支持断点续传；安装前校验 ELF（aarch64）；失败自动重试。插件下载共用这套源顺序
 
 ## 与用户沟通的注意点
 
