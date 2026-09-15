@@ -290,15 +290,11 @@ fun LiquidGlassNavBar(
                     currentIndex = targetIndex
                     onSelectedUpdated(targetIndex)
                 }
-                // 只有「拖拽把值停在了两项之间」才补一次回中。
-                //
-                // 点击（手指按下即抬起）时 onDragStarted 已经把动画指向按下那一项，
-                // 值正在全速飞过去；此时再无条件 updateValue(targetIndex) 会取消这个
-                // 动画并用零速度重启同一个弹簧 —— 肉眼看到的就是"一顿"。
-                // 官方实现在这里不调 updateValue，所以点击是顺的。
-                if (abs(targetValue - targetIndex) > 0.001f) {
-                    updateValue(targetIndex.toFloat())
-                }
+                // 与参考实现（miuix 官方示例 / SukiSU 的 FloatingBottomBar）一致：无条件回中。
+                // 本喵曾经在这里加过「只有拖拽把值停在两项之间才回中」的条件，
+                // 理由是「点击时会取消一个正在全速前进的动画」—— 那个诊断是**错的**：
+                // 真正的原因在页面组合（见 PumpkinApp 的 PageSlot），不是这里。
+                updateValue(targetIndex.toFloat())
                 animationScope.launch {
                     offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
                 }
