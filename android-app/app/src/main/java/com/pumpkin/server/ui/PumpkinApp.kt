@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.layout
 import com.pumpkin.server.ui.pages.RunPage
 import com.pumpkin.server.ui.pages.SettingsPage
 import com.pumpkin.server.ui.pages.UpdatePage
@@ -93,23 +94,23 @@ fun PumpkinApp(
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.statusBars),
                 ) {
-                    // 只组合当前页。
+                    // 三页常驻组合，只让当前页可交互。
                     //
-                    // 曾经改成「三页常驻组合、不可见时不绘制」来省掉切页的重新组合。
-                    // 那是个**严重错误**：drawWithContent 只管绘制，**不管触摸** ——
-                    // 三个页面铺在同一个 Box 里，最上层的设置页即使不可见也照样吃掉点击，
-                    // 于是「在运行页点控制台，设置页的配色被改了」「很多按钮功能错乱」。
+                    // 为什么不用 when 每次重新组合：切页要重建一整页（卡片/输入框/可滚动列），
+                    // 实测切页时 UI 线程会掉一帧（90th 19ms → 38ms、99th 53ms → 109ms）。
                     //
-                    // 真机实验坐实了这一点：在运行页点 (807,1431)（该处运行页无可点控件），
-                    // palette 从 cyan 变成 green。
-                    //
-                    // 性能的账其实在别处结了：真正的瓶颈是发 debug 包（ART 不做 AOT）和没开 R8。
-                    // 那两条修完之后，切页重新组合的开销完全可以接受，不需要这种危险优化。
-                    // 相关脚本：tools/test-hidden-page-hit.sh
-                    when (state.page) {
-                        0 -> RunPage(state = state, actions = actions)
-                        1 -> UpdatePage(state = state, actions = actions)
-                        else -> SettingsPage(state = state, actions = actions)
+                    // 为什么不用 drawWithContent 跳过绘制（曾经那么干过，是错的）：
+                    // **绘制与触摸是两套独立的遍历**。drawWithContent 只是不画，
+                    // 节点仍是全屏大小，照样吃掉点击 —— 结果是「很多按钮功能错乱」。
+                    // 详见 PageSlot 的注释与 tools/test-hidden-page-hit.sh。
+                    PageSlot(visible = state.page == 0) {
+                        RunPage(state = state, actions = actions)
+                    }
+                    PageSlot(visible = state.page == 1) {
+                        UpdatePage(state = state, actions = actions)
+                    }
+                    PageSlot(visible = state.page == 2) {
+                        SettingsPage(state = state, actions = actions)
                     }
                 }
             }
@@ -144,5 +145,42 @@ fun PumpkinApp(
             // 不受这里层级影响，这样放只是让「同一棵 Compose 树里只有一个对话框宿主」这件事直观。
             PumpkinDialogHost(state = state, actions = actions)
         }
+    }
+}
+
+/**
+ * 一页内容：**常驻组合**，但不可见时不可交互、也不绘制。
+ *
+ * 核心是 `Modifier.layout` 把不可见的页报成 **0×0**，而不是用 `drawWithContent` 不画。
+ * 这两者的差别是致命的，本喵踩过：
+ *
+ * **Compose 的绘制遍历与触摸遍历是两套独立的东西。**
+ * - `drawWithContent { if (visible) drawContent() }` 只是不画，节点**仍然是全屏大小**，
+ *   于是照样参与命中测试、照样吃掉点击。表现为「在某些页面点空白处，别的页面的按钮被触发」。
+ * - 报成 0×0 的节点不在任何触摸范围内，才算真的"不存在"。
+ *
+ * 代价与收益：页面仍会 measure（所以滚动位置等状态保留、切页不必重新组合），
+ * 但不绘制、不可交互。切页时的重新组合正是掉帧的来源，这里把它省掉。
+ *
+ * 验证方式（必须做，别只看代码）：`tools/test-hidden-page-hit.sh` ——
+ * 在运行页点一个"该页没有控件"的坐标，然后读 Prefs 看设置有没有被误改。
+ * 用 drawWithContent 那版会真的改掉（实测 palette 从 cyan 变成 green）；这一版不会。
+ */
+@Composable
+private fun PageSlot(
+    visible: Boolean,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = Modifier.layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints)
+            if (visible) {
+                layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+            } else {
+                layout(0, 0) { }
+            }
+        },
+    ) {
+        content()
     }
 }

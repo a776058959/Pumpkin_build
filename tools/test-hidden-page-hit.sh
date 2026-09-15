@@ -11,6 +11,14 @@ pal() {
   su -c 'grep -o "<string name=\"palette\">[^<]*" /data/data/com.pumpkin.server/shared_prefs/*.xml'
 }
 
+# 脚本假定应用在前台。装完包之后应用是被杀掉的，不启动就会把通知栏拉下来。
+# （踩过一次：swipe 变成下拉通知栏，dump 出来全是系统通知。）
+input keyevent KEYCODE_BACK
+am force-stop com.pumpkin.server
+sleep 1
+am start -n com.pumpkin.server/.MainActivity >/dev/null
+sleep 8
+
 echo "=== 1. 对照：当前 palette ==="
 pal
 
