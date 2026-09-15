@@ -92,7 +92,22 @@ android {
             signingConfig = signingConfigs.getByName("fixed")
         }
         release {
-            isMinifyEnabled = false
+            // 开 R8：删减 + 优化 + 内联。
+            //
+            // 这一步同时解决体积和性能两件事：
+            //   1. 体积 —— 关掉 R8 时依赖里的**每一个类**都原样进包。实测 release 包
+            //      94% 是 dex（classes.dex 13.79MB + classes2.dex 13.7MB，压缩前 27.5MB），
+            //      APK 因此 9.7MB，远超「Compose + miuix 大约 3~5MB」的预期。
+            //      R8 会删掉没人引用的类/方法/字段，并对热路径做内联。
+            //   2. 性能 —— Compose 极度依赖内联，R8 的内联对它是实打实的收益。
+            //
+            // 规则见 app/proguard-rules.pro（本应用没有反射，所以规则很少）。
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             signingConfig = signingConfigs.getByName("fixed")
         }
     }
