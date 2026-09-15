@@ -166,12 +166,18 @@ fun RunPage(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // 日志区：等宽字体 + 可选中，高度与原版 260dp 一致。
+                //
+                // 底色与日志字色都必须跟着明暗走。以前这里是写死的
+                //   .background(Color(0x33000000))  +  color = Color(0xFFCFD6E4)
+                // —— 20% 黑压在白卡片上是一块灰，浅灰字压在这块灰上几乎看不见，
+                // 浅色模式下控制台等于瞎了。深色下这两个值仍然合适，所以按明暗二分。
+                val dark = LocalPumpkinDark.current
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 200.dp, max = 260.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0x33000000))
+                        .background(if (dark) Color(0x33000000) else Color(0x0F000000))
                         .padding(10.dp),
                 ) {
                     val display = if (state.logText.isEmpty()) {
@@ -187,7 +193,8 @@ fun RunPage(
                             color = if (state.logText.isEmpty()) {
                                 PumpkinColors.TextDim
                             } else {
-                                Color(0xFFCFD6E4)
+                                // 深色下用偏亮的冷灰；浅色下必须用深色，否则读不出来。
+                                if (dark) Color(0xFFCFD6E4) else Color(0xFF2A3140)
                             },
                         )
                     }
