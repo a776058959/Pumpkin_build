@@ -56,7 +56,9 @@
   亮色方案会自动把状态栏图标翻成深色（`PumpkinPalettes.isLight`）。
 - **App 更新改为应用内下载 + 直接安装**：不再跳浏览器。下载进度在「关于」卡片里，
   下完走 FileProvider 交给系统安装器。下载源默认「官方直连」，可在「关于」里改。
-- 最新已发布：`Custom-20260915-0825`（versionCode `207110825`，带 `pumpkin-shell.apk`）。
+- 最新已发布：`Custom-20260915-1039`（**release 包**，9.7MB）。
+  App 现在出的是 `assembleRelease` 而**不是** `assembleDebug` —— 这是性能关键，
+  详见下面的「底栏点击卡顿排查」。
 - **原生 Linux 可用**：在手机本机内核上跑真正的 Alpine（chroot），不是 Termux 那种用户态终端。
   脚本、实测结果与踩过的坑见 [tools/native-linux/](tools/native-linux/)。
 - 术语已统一：源码与文档里不再叫「壳」，一律叫「南瓜坞 / App」。
@@ -295,6 +297,69 @@ D:\adb-fastboot\adb.exe shell "dumpsys package com.pumpkin.server | grep -E 'ver
 > **不要手工删/传 Release 资产了。**
 > 以前是那么干的（流程里甚至记着一个写死的 release id），现在由 CI 负责 ——
 > 手工介入会让 tag 与 APK 的版本号错位，那就正好制造出「每次都提示更新、装完还提示」的 bug。
+
+## 底栏点击卡顿排查（2026-09-15）
+
+### 现象
+
+底栏胶囊来回快点三个按钮时不顺畅，"像帧数低"；**拖动是顺的**。
+
+### 一、gfxinfo 量帧（压力脚本：快速来回点底栏）
+
+| 版本 | 总帧数 | Janky 帧 | 90th | 99th | Slow UI thread | Missed Vsync | GPU 99th |
+|---|---|---|---|---|---|---|---|
+| 原始 debug | 252 | 17 (6.75%) | 48ms | 150ms | 17 | 8 | ~12ms |
+| +三页常驻组合 | 307 | 22 (7.17%) | 28ms | 48ms | 19 | 8 | ~12ms |
+| +撤销一处错误修复 | 286 | 17 (5.94%) | 29ms | 73ms | 16 | 6 | ~12ms |
+| **换成 release 包** | 268 | **12 (4.48%)** | **20ms** | 69ms | **10** | **3** | ~12ms |
+
+**GPU 99th 始终 ~12ms** → 瓶颈在 UI 线程 CPU，不在 GPU / 玻璃着色器。
+这一条就否掉了"液态玻璃太重"这个直觉判断。
+
+### 二、simpleperf 采 CPU（debug 包，15 秒 / 16593 个样本）
+
+| 函数 | 占比 |
+|---|---|
+| `art_jni_trampoline` | 2.16% |
+| **`artQuickToInterpreterBridge`** | **2.14%** |
+| **`art::interpreter::ExecuteSwitchImplCpp`** | **1.80%** |
+| `androidx.compose.ui.node.NodeCoordinator.rectInParent` | 1.45% |
+| `artQuickGenericJniTrampoline` | 1.02% |
+| `gc::collector::ConcurrentCopying::AddLiveBytesAndScanRef` | 0.97% |
+| `SemanticsNode.fillOneLayerOfSemanticsWrappers` | 0.92% |
+
+### 根因
+
+**发的是 debug 包。** `debuggable=true` 时 ART 不做 AOT 编译，整个 Compose 运行时
+跑在解释器上；Compose 极度依赖内联，解释器模式下慢一大截，分配多又导致 GC 频繁。
+SukiSU 等同类应用发的是 **release** 包，所以它们顺。
+
+换 release 后复采样：解释器那两个符号**完全消失**（未进前 45 名），`flags=0x0`（非 debuggable）。
+
+### 修复
+
+CI 从 `gradle assembleDebug` 改为 **`assembleRelease`**。
+release 与 debug 用**同一把签名密钥**（`signingConfigs["fixed"]` / `pumpkin-signing.p12`），
+所以 release 包能直接覆盖安装，不用卸载、不丢数据。体积 13.7MB → **9.7MB**。
+
+`isMinifyEnabled` **刻意保持 false**：这一步只隔离「AOT」一个变量；
+开 R8 会额外加内联，但需要单独验证，混在一起就无法归因。
+
+### 遗留
+
+`SemanticsNode.fillOneLayerOfSemanticsWrappers` 0.92% —— 语义树遍历，
+可能与底栏的 `clearAndSetSemantics` 以及无障碍/自动化 dump 有关。未动，待后续。
+
+### 教训（重要）
+
+**遇到「卡」的问题，先用 `simpleperf` / `gfxinfo` 量，再决定改什么。**
+本次一开始凭直觉去改 UI 代码（改了底栏动画、加了页面过渡、改了页面组合方式），
+绕了三轮才发现根因在**构建类型**上，跟 UI 代码无关。
+
+- `gfxinfo` 用来分辨「轨迹问题」和「掉帧问题」：前者帧时间正常，后者会看到成片 >16.7ms。
+- `simpleperf` 直接点名热点函数，比读代码猜快得多。
+- 两者都要 **`su`**：用 `shell` 用户跑 simpleperf 会 `Permission denied`。
+- 相关脚本：`tools/measure-nav-fps.sh`、`tools/profile-nav-tap.sh`、`tools/capture-nav-anim.sh`。
 
 ## 关键约束（改代码前必读，全是踩过的坑）
 
