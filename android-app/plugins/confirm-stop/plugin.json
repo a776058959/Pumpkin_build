@@ -1,0 +1,7 @@
+{
+  "id": "confirm-stop",
+  "name": "停止前确认",
+  "version": "1.0",
+  "description": "点「停止」时先弹一次确认，避免误触把玩家踢下线。关掉它就恢复成一点即停。",
+  "entry": "com.pumpkin.plugin.confirmstop.ConfirmStopPlugin"
+}

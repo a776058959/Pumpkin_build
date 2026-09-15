@@ -9,10 +9,12 @@
 
 PAGE="$1"
 case "$PAGE" in
-  运行) X=193; TITLE=控制台 ;;
-  更新) X=424; TITLE=版本 ;;
-  插件) X=655; TITLE=插件商店 ;;
-  设置) X=887; TITLE=外观 ;;
+  运行) X=193; TITLE='控制台' ;;
+  更新) X=424; TITLE='版本' ;;
+  # 「插件」页现在是两段（已安装 / 商店），两段各有各的独有文字，
+  # 所以这里按「任一出现即算到了」判断，不能只认一个。
+  插件) X=655; TITLE='插件商店|重新加载插件' ;;
+  设置) X=887; TITLE='外观' ;;
   *) echo "用法：goto.sh 运行|更新|插件|设置"; exit 2 ;;
 esac
 
@@ -21,7 +23,7 @@ while [ $i -lt 5 ]; do
   input tap $X 2278
   sleep 3
   uiautomator dump /sdcard/g.xml >/dev/null 2>&1
-  if cat /sdcard/g.xml | tr '>' '\n' | grep -q "text=\"$TITLE"; then
+  if cat /sdcard/g.xml | tr '>' '\n' | grep -qE "text=\"($TITLE)"; then
     echo "已在「$PAGE」页（第 $((i + 1)) 次点击）"
     exit 0
   fi

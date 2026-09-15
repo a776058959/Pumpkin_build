@@ -75,6 +75,9 @@ interface PumpkinActions {
     /** 拉取插件索引（商店列表）。 */
     fun refreshPluginStoreFromUi()
 
+    /** 切插件页的分段（见 pages/PluginTabs：0=已安装 1=商店）。 */
+    fun setPluginTabFromUi(tab: Int)
+
     /** 安装或更新指定 id 的插件。全程只写 App 私有目录，不需要 root。 */
     fun installPluginFromUi(id: String)
 

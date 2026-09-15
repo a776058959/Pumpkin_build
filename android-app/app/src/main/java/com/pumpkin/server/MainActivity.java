@@ -369,6 +369,16 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             }
         }
         s.setConsoleFontScale(fontScale);
+
+        // 插件覆盖：点「停止」前是否先确认（见 PluginKeys.CONFIRM_STOP）。
+        // 只有明确写了 "false" 才关掉确认 —— 覆盖值是插件写的任意字符串，
+        // 「解析不出来」必须回落到安全的一侧，而不是当成 false。
+        boolean confirmStop = true;
+        if (plugins != null) {
+            confirmStop = !"false".equalsIgnoreCase(
+                    plugins.override(com.pumpkin.plugin.PluginKeys.CONFIRM_STOP));
+        }
+        s.setConfirmStop(confirmStop);
         s.setDirText("数据目录 " + ServerPaths.workDir(this).getAbsolutePath());
 
         boolean rootMode = Prefs.getBool(this, "root_mode", false);
@@ -427,6 +437,17 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     }
 
     public void stopServerFromUi() {
+        // 停服务端会把游戏里的玩家直接踢下线，是运行页最容易误触的按钮，
+        // 所以默认先确认一次。「停止前确认」插件可以把它关掉（见 PluginKeys.CONFIRM_STOP）。
+        if (state != null && state.getConfirmStop()) {
+            confirm("确定停止服务端吗？正在游戏里的玩家会被断开。", new Runnable() {
+                @Override
+                public void run() {
+                    stopServer();
+                }
+            });
+            return;
+        }
         stopServer();
     }
 
@@ -1610,6 +1631,18 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         state.getPluginSettings().clear();
         for (com.pumpkin.plugin.PluginSetting st : plugins.settings()) {
             String v = plugins.override(st.getKey());
+            if (v == null) {
+                // 没被覆盖过就显示插件声明的默认值。
+                //
+                // 这一步不能省：开关的显示是「值 == "true" 就是开」，
+                // 不给默认值的话，一个「默认开」的开关会显示成**关** ——
+                // 用户以为它是关的，点一下反而把它写成了 "true"（也就是打开）。
+                // 实测就是这么错的：确认框本来会弹，装完插件点一下反而不弹了。
+                //
+                // 代价是插件得保证 defaultValue 与宿主的内置默认一致
+                //（见 docs/dev/plugins.md 的「defaultValue 的约定」）。
+                v = st.getDefaultValue();
+            }
             state.getPluginSettings().add(new com.pumpkin.server.ui.PluginSettingView(
                     st.getKey(),
                     st.getTitle(),
@@ -1807,6 +1840,18 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         reloadPlugins();
         fillStore();
         refresh();
+    }
+
+    /** 切插件页的分段（见 pages/PluginTabs）。切到商店时顺手拉一次列表，省一次点击。 */
+    public void setPluginTabFromUi(int tab) {
+        if (state == null) {
+            return;
+        }
+        state.setPluginTab(tab);
+        if (tab == 1 && state.getPluginStore().isEmpty()
+                && state.getPluginInstalling().isEmpty()) {
+            refreshPluginStoreFromUi();
+        }
     }
 
     /** 把索引缓存灌进 Compose 状态，并把已安装的版本 / 启用状态对上。 */

@@ -127,6 +127,23 @@ class PumpkinUiState {
     /** 控制台字号倍率，来自插件覆盖板（见 PluginKeys.CONSOLE_FONT_SCALE）。1 = 内置字号。 */
     var consoleFontScale by mutableFloatStateOf(1f)
 
+    /**
+     * 点「停止」前是否先确认，来自插件覆盖板（见 PluginKeys.CONFIRM_STOP）。
+     *
+     * 默认 true —— 与 App 内置行为一致，插件只能把它关掉。
+     */
+    var confirmStop by mutableStateOf(true)
+
+    /**
+     * 插件页当前的分段（见 pages/PluginTabs）。
+     *
+     * 默认「已安装」：装好插件之后，改设置 / 停用 / 卸载都在这一段，
+     * 而商店只是偶尔来看一次。默认落在常用的那一段，省掉每次多一次点击。
+     *
+     * 不落盘：它是「刚才在看哪一栏」这种会话内的位置，不是用户的偏好设置。
+     */
+    var pluginTab by mutableIntStateOf(0)
+
     /** 已安装的插件（含启用状态），由 Java 侧填。 */
     val installedPlugins = mutableStateListOf<PluginStoreItemView>()
 

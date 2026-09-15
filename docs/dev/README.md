@@ -50,7 +50,10 @@
 
 | 脚本 | 用途 |
 |---|---|
-| `verify-plugin-crud.sh` | 插件页「增删改查」全流程，20 项断言一次跑完 |
+| `verify-plugin-crud.sh` | 插件页「增删改查」全流程，29 项断言一次跑完 |
+| `verify-stop-confirm.sh` | 插件改**行为**的验证（确认框弹不弹）——需要服务端在跑 |
+| `plugin-reset.sh` | 把插件状态清干净（跑验证脚本前先跑） |
+| `install-server-for-test.sh` | 把推上去的服务端二进制装成 App 的一个版本（测试用旁路） |
 | `dump-ui.sh` | 界面 →「文字 @ 中心坐标」，用来算点击位置 |
 | `goto-page.sh` | 切页并确认真的切过去了 |
 | `console-height.sh` | 量运行页控制台文字高度（验证字号类改动） |
