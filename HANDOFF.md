@@ -48,7 +48,15 @@
 - **发布链路已补齐**：`apk-only.yml` 以前只出 artifact、从不发 Release，
   导致「改完 UI 只跑了 apk-only」时改动永远到不了用户手里（本地 adb 是新的，Release 是旧的，
   用户点检查更新报「已是最新」）。现在加了 `publish` 开关，CI 自己建 Release。详见「出包流程」。
-  最新已发布：`Custom-20260915-0745`（versionCode `207110745`，带 `pumpkin-shell.apk`）。
+- **两条流水线已分开**：`build.yml` 只构建/发布**服务端**（上游提交触发或手动），
+  App 一律走 `apk-only.yml`（手动 + 勾 publish）。服务端 Release 不再带 APK，
+  所以 `releases/latest/download/pumpkin-shell.apk` 不再可靠 —— 取 App 用 App 内「检查更新」。
+- **12 套配色**（9 深 + 3 亮）：新增 深紫暮色 / 墨绿深林 / 酒红微醺 / 晨雾白 / 暖米色 / 淡紫晨光。
+  每套的正文对比度 ≥ 7:1、次要文字与按钮文字 ≥ 4.5:1（本喵自己算的 WCAG，外派模型算错过 4 处）。
+  亮色方案会自动把状态栏图标翻成深色（`PumpkinPalettes.isLight`）。
+- **App 更新改为应用内下载 + 直接安装**：不再跳浏览器。下载进度在「关于」卡片里，
+  下完走 FileProvider 交给系统安装器。下载源默认「官方直连」，可在「关于」里改。
+- 最新已发布：`Custom-20260915-0825`（versionCode `207110825`，带 `pumpkin-shell.apk`）。
 - **原生 Linux 可用**：在手机本机内核上跑真正的 Alpine（chroot），不是 Termux 那种用户态终端。
   脚本、实测结果与踩过的坑见 [tools/native-linux/](tools/native-linux/)。
 - 术语已统一：源码与文档里不再叫「壳」，一律叫「南瓜坞 / App」。
