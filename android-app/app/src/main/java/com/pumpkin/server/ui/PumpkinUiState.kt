@@ -99,6 +99,13 @@ class PumpkinUiState {
     var repo by mutableStateOf("")
     var mirror by mutableStateOf("")
 
+    /**
+     * 选中的配色方案 id（见 PumpkinPalettes）。
+     *
+     * 空串表示还没读到偏好，PumpkinTheme 会回落到默认配色。
+     */
+    var paletteId by mutableStateOf("")
+
     /** 南瓜坞版本号（关于页用）。 */
     var appVersion by mutableStateOf("")
 

@@ -47,13 +47,19 @@ fun PumpkinApp(
     state: PumpkinUiState,
     actions: PumpkinActions,
 ) {
-    PumpkinTheme(dark = true) {
+    // 配色从 state 读（Java 侧从偏好里恢复）。传给 PumpkinTheme 后，
+    // 组件通过 PumpkinColors.Accent / Text / TextDim 取到的就是这套方案的颜色。
+    val palette = PumpkinPalettes.byId(state.paletteId)
+
+    PumpkinTheme(palette = palette, dark = true) {
         // 底栏模糊的采样源：必须包住「所有会出现在底栏背后的内容」。
         val contentBackdrop = rememberLayerBackdrop()
 
         val dark = LocalPumpkinDark.current
-        val bgTop = if (dark) Color(0xFF171A22) else Color(0xFFF2F4F9)
-        val bgBottom = if (dark) Color(0xFF0E1016) else Color(0xFFE6EAF3)
+        // 背景渐变两端取自配色方案。窗口底色也跟着 bgTop 走（见 MainActivity），
+        // 所以冷启动那一帧与这里画出来的顶色是同一个颜色，不会闪。
+        val bgTop = if (dark) palette.bgTop else Color(0xFFF2F4F9)
+        val bgBottom = if (dark) palette.bgBottom else Color(0xFFE6EAF3)
 
         Box(modifier = Modifier.fillMaxSize()) {
             // ---------- 渐变背景（最底层，不进背板：玻璃底下也有底色可透） ----------

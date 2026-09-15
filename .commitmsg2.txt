@@ -1,0 +1,22 @@
+feat(theme): six colour schemes, switchable in settings
+
+The accent colour was three hard-coded constants, so changing the look meant
+editing code. It is now a palette: each scheme declares only anchor colours
+(gradient ends, card surface, accent, text), and the derived ones - disabled
+states, container tints, dividers - are mixed from them. Six schemes times forty
+literal colour values would have been unmaintainable, and would guarantee a
+missed spot on the next edit.
+
+Schemes: 星夜蓝 (the original, default), 松林绿, 落日渐晖, 樱雾粉, 深海青, 石墨灰.
+
+PumpkinColors.Accent/Text/TextDim stay the public names but become @Composable
+getters backed by a CompositionLocal, so call sites are unchanged and every
+reader recomposes when the palette changes - no threading a palette parameter
+down through the widget tree.
+
+Palettes carrying a light accent (石墨灰) also carry onAccent, because white text
+on light grey is unreadable; miuix's onPrimary is set from it.
+
+The window background follows the palette too. It is what the system paints
+before the app's first frame, so leaving it fixed would flash the previous
+scheme's colour on every cold start.

@@ -60,6 +60,9 @@ interface PumpkinActions {
     /** 点选某个 GitHub 加速源；prefix 为空串表示直连。 */
     fun applyMirrorFromUi(prefix: String?)
 
+    /** 点选某套配色方案；id 见 PumpkinPalettes，null 表示回落到默认。 */
+    fun applyPaletteFromUi(id: String?)
+
     fun clearVersionsFromUi()
 
     fun clearGameDataFromUi()

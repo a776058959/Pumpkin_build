@@ -6,6 +6,7 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -89,6 +90,9 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         updates = new UpdateClient(this);
         downloader = new Downloader(this);
         state = new com.pumpkin.server.ui.PumpkinUiState();
+        // 恢复配色偏好。Compose 侧读 state.paletteId 决定用哪套主题；
+        // 取到空串（没存过）时由 PumpkinPalettes 回落到默认配色。
+        state.setPaletteId(Prefs.get(this, "palette", ""));
         // 界面交给 Compose：三页 + 液态玻璃底栏都在 ui 包里。
         // setContent 必须由 Kotlin 侧调用（@Composable lambda 带 $composer 参数，Java 造不出来）。
         com.pumpkin.server.ui.PumpkinUiBridge.launchPumpkinUi(this, state, this);
@@ -153,15 +157,20 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
-        // 窗口底色设成界面渐变的顶色。主题默认是 Theme.Material 的 #303030，
+        // 窗口底色设成当前配色渐变的顶色。主题默认是 Theme.Material 的 #303030，
         // 在 Compose 画出第一帧之前会先露出来 —— 冷启动时闪一条灰带就是它。
-        // 主题里也设了同一颜色（themes.xml），那里管「系统画的第一帧」，这里管运行时。
-        window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF171A22));
+        // 主题里也设了同一颜色（themes.xml）作为兜底，这里按用户选的配色覆盖。
+        window.setBackgroundDrawable(new ColorDrawable(paletteWindowColor()));
     }
 
     // 曾经这里有个 applyInsets(root)：把系统栏高度 setPadding 到 android.R.id.content。
     // 已删除 —— 它正是「上下两条灰带」的元凶（padding 出来的那块没有 Compose 内容，
     // 露出窗口底色）。现在内缩由 Compose 的 WindowInsets 处理。
+
+    /** 当前配色偏好对应的窗口底色；偏好缺失时由 PumpkinPalettes 回落到默认配色。 */
+    private int paletteWindowColor() {
+        return com.pumpkin.server.ui.PumpkinPalettes.windowColor(Prefs.get(this, "palette", ""));
+    }
 
     @Override
     protected void onResume() {
@@ -362,6 +371,26 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         }
         toast(p.isEmpty() ? "已改为直连（不加速）" : "已选用加速源：" + p);
         refresh();
+    }
+
+    /**
+     * 设置页点选配色方案。
+     *
+     * @param id PumpkinPalettes 里的 id；null 或空串表示回到默认配色。
+     */
+    public void applyPaletteFromUi(String id) {
+        String pid = id == null ? "" : id.trim();
+        Prefs.put(this, "palette", pid);
+        if (state != null) {
+            state.setPaletteId(pid);
+        }
+        // 窗口底色要跟着换。不换的话，系统栏那一条会留着上一套配色的颜色 ——
+        // 界面已经变粉了、系统栏还是蓝的，看着像没生效。
+        Window window = getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(paletteWindowColor()));
+        }
+        toast("已切换配色：" + com.pumpkin.server.ui.PumpkinPalettes.nameOf(pid));
     }
 
     public void clearVersionsFromUi() {
