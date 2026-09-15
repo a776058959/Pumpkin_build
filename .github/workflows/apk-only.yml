@@ -1,6 +1,6 @@
 name: Build Pumpkin shell APK
 
-# 只构建「壳」APK：里面**不含**服务端二进制，服务端由 App 运行时从本仓库 Releases 下载。
+# 只构建「南瓜坞」APK：里面**不含**服务端二进制，服务端由 App 运行时从本仓库 Releases 下载。
 # 改界面/逻辑后用这个，几十秒就能出包。
 on:
   workflow_dispatch:

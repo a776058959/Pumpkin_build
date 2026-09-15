@@ -25,7 +25,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * GitHub Releases 客户端：列出可用服务端版本、下载原生二进制、查询壳自身的更新。
+ * GitHub Releases 客户端：列出可用服务端版本、下载原生二进制、查询南瓜坞自身的更新。
  *
  * 下载源策略：直连优先，失败自动回退到内置加速前缀；成功过的源会被记住，下次优先用它。
  * 支持断点续传（HTTP Range），用于「暂停后继续」。
@@ -62,8 +62,8 @@ public final class UpdateClient {
         }
     }
 
-    /** 壳（APK）自身的发布信息。 */
-    public static final class ShellAsset {
+    /** 南瓜坞（APK）自身的发布信息。 */
+    public static final class AppAsset {
         public String name = "";
         /** 所在 release 的 tag，如 Custom-20260915-0244。 */
         public String tag = "";
@@ -180,19 +180,19 @@ public final class UpdateClient {
         return out;
     }
 
-    /** 查最新 Release 里的壳 APK（用于检查壳自身有没有更新）。 */
+    /** 查最新 Release 里的南瓜坞 APK（用于检查南瓜坞自身有没有更新）。 */
     /**
-     * 找「壳」自己（APK）的发布信息。
+     * 找「南瓜坞」自己（APK）的发布信息。
      *
      * 为什么不能只查 /releases/latest：
-     *   本仓库的 Release 是「上游服务端构建」和「壳 APK」共用一个发布流的，
+     *   本仓库的 Release 是「上游服务端构建」和「南瓜坞 APK」共用一个发布流的，
      *   而 latest 只会返回**最新那一个** release —— 它经常只带服务端二进制、不带 APK
-     *   （服务端构建比壳频繁得多）。早先只查 latest 的写法在那种情况下直接返回 null，
-     *   用户侧表现为「没有找到壳的发布信息」，于是永远检查不到壳的更新。
+     *   （服务端构建比南瓜坞频繁得多）。早先只查 latest 的写法在那种情况下直接返回 null，
+     *   用户侧表现为「没有找到南瓜坞的发布信息」，于是永远检查不到南瓜坞的更新。
      *
      * 现在改为：拉最近若干个 release，取其中**最新的、确实带 .apk 附件**的那个。
      */
-    public ShellAsset fetchShellAsset() throws IOException {
+    public AppAsset fetchAppAsset() throws IOException {
         // releases?per_page=N 已经按发布时间倒序返回，第一个带 apk 的就是我们要的。
         String url = apiBase(ctx) + "/repos/" + repo(ctx) + "/releases?per_page=20";
         JSONArray rels;
@@ -201,7 +201,7 @@ public final class UpdateClient {
         } catch (JSONException e) {
             throw new IOException("解析失败: " + e.getMessage());
         }
-        ShellAsset best = null;
+        AppAsset best = null;
         for (int i = 0; i < rels.length(); i++) {
             JSONObject rel = rels.optJSONObject(i);
             if (rel == null || rel.optBoolean("draft", false)) {
@@ -220,13 +220,13 @@ public final class UpdateClient {
                 if (!nm.endsWith(".apk")) {
                     continue;
                 }
-                ShellAsset s = new ShellAsset();
+                AppAsset s = new AppAsset();
                 s.name = nm;
                 s.tag = rel.optString("tag_name", "");
                 s.downloadUrl = a.optString("browser_download_url", null);
                 s.size = a.optLong("size", 0);
                 // updated_at 表示「这个 apk 附件最后一次被替换的时间」，
-                // 比 release 的 published_at 更贴近壳的真实新旧（重新上传 apk 不会改 published_at）。
+                // 比 release 的 published_at 更贴近南瓜坞的真实新旧（重新上传 apk 不会改 published_at）。
                 s.updatedAt = parseIso(a.optString("updated_at", ""));
                 s.versionCode = parseVersionCodeFromTag(s.tag);
                 // 选「最新」的判据：优先比 tag 解析出的版本号，都是 0（老式 tag）时再比时间戳。
@@ -404,7 +404,7 @@ public final class UpdateClient {
         conn.setConnectTimeout(20000);
         conn.setReadTimeout(60000);
         conn.setInstanceFollowRedirects(true);
-        conn.setRequestProperty("User-Agent", "PumpkinServerShell/1.0 (Android)");
+        conn.setRequestProperty("User-Agent", "Pumpkin-App/1.0 (Android)");
         conn.setRequestProperty("Accept", "application/vnd.github+json");
         if (startOffset > 0) {
             conn.setRequestProperty("Range", "bytes=" + startOffset + "-");

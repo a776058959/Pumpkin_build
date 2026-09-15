@@ -1,7 +1,7 @@
 // Copyright 2026, Pumpkin 南瓜坞 contributors
 // SPDX-License-Identifier: Apache-2.0
 //
-// 顶层 Compose 壳：一块铺满屏幕的内容背板（负责被底栏模糊采样）+ 三页内容 + 液态玻璃底栏。
+// 顶层 Compose 界面：一块铺满屏幕的内容背板（负责被底栏模糊采样）+ 三页内容 + 液态玻璃底栏。
 //
 // 层级自下而上：
 //   1. 渐变背景（Box 铺满）

@@ -99,8 +99,8 @@ class PumpkinUiState {
     var repo by mutableStateOf("")
     var mirror by mutableStateOf("")
 
-    /** 壳版本号（关于页用）。 */
-    var shellVersion by mutableStateOf("")
+    /** 南瓜坞版本号（关于页用）。 */
+    var appVersion by mutableStateOf("")
 
     // ---------------------------------------------------------------- 版本列表
 

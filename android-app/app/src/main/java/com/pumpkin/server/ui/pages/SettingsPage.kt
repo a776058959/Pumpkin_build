@@ -208,12 +208,12 @@ fun SettingsPage(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "版本 " + state.shellVersion,
+                    text = "版本 " + state.appVersion,
                     style = MiuixTheme.textStyles.body1,
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = { actions.checkShellUpdateFromUi() },
+                    onClick = { actions.checkAppUpdateFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("检查更新") }
                 Spacer(modifier = Modifier.height(10.dp))

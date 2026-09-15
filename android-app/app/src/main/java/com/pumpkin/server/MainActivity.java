@@ -27,8 +27,8 @@ import com.pumpkin.server.ui.PumpkinDialogItem;
 import com.pumpkin.server.ui.PumpkinDialogs;
 
 /**
- * 轻壳主界面：底部悬浮玻璃导航栏 + 三个页面（运行 / 更新 / 设置）。
- * 壳本身不含服务端，联网从 Releases 下载、切换、回滚、清理版本。
+ * 南瓜坞主界面：底部悬浮玻璃导航栏 + 三个页面（运行 / 更新 / 设置）。
+ * 南瓜坞本身不含服务端，联网从 Releases 下载、切换、回滚、清理版本。
  *
  * 界面已由 Java View 迁移到 Compose（见 ui 包），本类保留全部业务逻辑，
  * 并实现 {@link com.pumpkin.server.ui.PumpkinActions} 作为 Compose 的动作出口。
@@ -70,8 +70,8 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     /** confirm() 要执行的动作，点「确定」时跑。 */
     private Runnable pendingConfirm;
 
-    /** 壳更新对话框里要下载的地址，点「下载」时打开。 */
-    private String pendingShellUrl;
+    /** 应用更新对话框里要下载的地址，点「下载」时打开。 */
+    private String pendingAppUrl;
 
     private final Runnable ticker = new Runnable() {
         @Override
@@ -123,7 +123,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                     java.io.PrintWriter w = new java.io.PrintWriter(new java.io.FileWriter(f, false));
                     w.println("时间: " + new java.util.Date());
                     w.println("线程: " + thread.getName());
-                    w.println("壳版本: " + versionName());
+                    w.println("南瓜坞版本: " + versionName());
                     w.println("Android API: " + Build.VERSION.SDK_INT);
                     w.println("---- 堆栈 ----");
                     ex.printStackTrace(w);
@@ -277,7 +277,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         // 日志整段同步：Compose 侧只做展示，不做增量 diff，避免两边状态不一致。
         s.setLogText(server.tailLog());
 
-        s.setShellVersion(versionName());
+        s.setAppVersion(versionName());
     }
 
     // ---- 供 Compose 调用的桥接方法（都只是转调原有私有方法，业务逻辑不变） ----
@@ -351,8 +351,8 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         showDeleteDialog(versions.listInstalled());
     }
 
-    public void checkShellUpdateFromUi() {
-        checkShellUpdate();
+    public void checkAppUpdateFromUi() {
+        checkAppUpdate();
     }
 
     /** 保存下载源。参数来自 Compose 侧的输入框（原方法读 EditText，这里改为显式传参）。 */
@@ -467,10 +467,10 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             case PumpkinDialogs.NEED_STOP:
                 stopThenDownload();
                 break;
-            case PumpkinDialogs.SHELL_UPDATE:
-                if (pendingShellUrl != null) {
-                    openUrl(pendingShellUrl);
-                    pendingShellUrl = null;
+            case PumpkinDialogs.APP_UPDATE:
+                if (pendingAppUrl != null) {
+                    openUrl(pendingAppUrl);
+                    pendingAppUrl = null;
                 }
                 break;
             case PumpkinDialogs.CONFIRM:
@@ -493,8 +493,8 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             case PumpkinDialogs.CONFIRM:
                 pendingConfirm = null;
                 break;
-            case PumpkinDialogs.SHELL_UPDATE:
-                pendingShellUrl = null;
+            case PumpkinDialogs.APP_UPDATE:
+                pendingAppUrl = null;
                 break;
             default:
                 break;
@@ -1123,13 +1123,13 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     }
 
     /** 检查本应用（南瓜坞）自身有没有新版本。 */
-    private void checkShellUpdate() {
+    private void checkAppUpdate() {
         toast("正在检查更新…");
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    final UpdateClient.ShellAsset asset = updates.fetchShellAsset();
+                    final UpdateClient.AppAsset asset = updates.fetchAppAsset();
                     // 用 versionCode 判断新旧，而不是安装时间：
                     // 安装时间会被「重装同一个包」刷新，根本分不出哪个更新。
                     int installedCode;
@@ -1149,7 +1149,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                         @Override
                         public void run() {
                             if (asset == null || asset.downloadUrl == null) {
-                                toast("服务器上还没有发布新的壳版本");
+                                toast("服务器上还没有发布新的南瓜坞版本");
                                 return;
                             }
                             // 优先按 versionCode 比；tag 解析不出序号时退回时间戳（留 2 分钟余量）。
@@ -1160,18 +1160,18 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                                 newer = asset.updatedAt > installedAt + 120000L;
                             }
                             if (newer) {
-                                pendingShellUrl = asset.downloadUrl;
+                                pendingAppUrl = asset.downloadUrl;
                                 state.showConfirmDialog(
-                                        PumpkinDialogs.SHELL_UPDATE,
-                                        "壳有新版本",
-                                        "服务器上发布了新的壳："
+                                        PumpkinDialogs.APP_UPDATE,
+                                        "南瓜坞有新版本",
+                                        "服务器上发布了新版南瓜坞："
                                                 + (asset.tag.isEmpty() ? asset.name : asset.tag)
                                                 + "\n当前已装：" + versionName()
                                                 + "\n\n要现在下载吗？下载完点开安装包覆盖安装即可。",
                                         "下载",
                                         "以后");
                             } else {
-                                toast("壳已是最新（" + versionName() + "）");
+                                toast("南瓜坞已是最新（" + versionName() + "）");
                             }
                         }
                     });
@@ -1184,7 +1184,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                     });
                 }
             }
-        }, "shell-check").start();
+        }, "app-update-check").start();
     }
 
     private void openUrl(String url) {

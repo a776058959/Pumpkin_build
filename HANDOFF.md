@@ -3,7 +3,7 @@
 ## 这个项目在干什么
 
 把 **Pumpkin**（Rust 写的 Minecraft 服务端，上游 https://github.com/Pumpkin-MC/Pumpkin）编译到安卓，
-再配一个安卓外壳 App「**南瓜坞**」：外壳本身**不含服务端**，运行时从 GitHub Releases 下载服务端二进制并启动。
+再配一个安卓 App「**南瓜坞**」：App 本身**不含服务端**，运行时从 GitHub Releases 下载服务端二进制并启动。
 
 ## 源码在哪（重要）
 
@@ -16,7 +16,7 @@
 
 | 位置 | 说明 |
 |---|---|
-| `D:\Pumpkin_build` | **新仓库（真源）**，GitHub: `a776058959/Pumpkin_build`。只放外壳源码 + CI，不保存上游代码 |
+| `D:\Pumpkin_build` | **新仓库（真源）**，GitHub: `a776058959/Pumpkin_build`。只放 App 源码 + CI，不保存上游代码 |
 | `D:\GitHub\Pumpkin_sgx` | 旧 fork 仓库（CI 已 disabled），本地保留完整上游代码供查阅 |
 | `D:\androidsdk` | 本地工具与归档：NDK r27c、winlibs mingw、下载的 APK、manifest 解析脚本 |
 | `D:\androidsdk\shots` | 验证截图归档（含液态玻璃前后对比、像素分析用图） |
@@ -27,7 +27,7 @@
 
 ## 当前进度快照（2026-09-14 晚）
 
-- 外壳版本 **0.3.0（versionCode 3）**：已构建、已发布、**已装到测试机并运行正常（无崩溃）**
+- App 版本 **0.3.0（versionCode 3）**：已构建、已发布、**已装到测试机并运行正常（无崩溃）**
 - 仓库状态：本地 `main` == GitHub `main` == 提交 **`59ac8f3`**
   （`feat(shell): liquid-glass panels in the current Java stack`）
 - Release 资产 `pumpkin-shell.apk` = **106890 字节**（0.3.0，含液态玻璃）；
@@ -190,7 +190,7 @@ Agent Plan 用 `anthropic-messages` 协议、端点 `https://ark.cn-beijing.volc
 
 | 工作流 | 用途 |
 |---|---|
-| `.github/workflows/apk-only.yml` | **只重打包外壳**，几十秒出包（改 UI 用这个） |
+| `.github/workflows/apk-only.yml` | **只重打包 App**，几十秒出包（改 UI 用这个） |
 | `.github/workflows/build.yml` | 定时（每 2 小时比较上游 SHA，无新提交不构建）+ 全平台构建 + 发布 Release + 记录基线 |
 | `.github/workflows/prune-dryrun.yml` | 手动检查 Release 保留策略会删什么（只打印不删） |
 
@@ -234,7 +234,7 @@ Release 保留策略脚本：`.github/scripts/prune-releases.sh`
   如果新会话的文件策略是 `workspace-write`（只允许改工作目录），写 `D:\Pumpkin_build`
   会被沙箱拒绝——按提示申请放宽权限（`danger-full-access`）即可，不是命令写错了。
 
-## 外壳 App 当前功能
+## 南瓜坞 App 当前功能
 
 - 三个页面 + 底部悬浮**液态玻璃**导航（实时背景模糊 + 边缘亮线 + 顶部光泽 + 倾斜流动高光）
 - **运行页**：状态与运行时长、联机地址（Java/基岩）、启动/停止、电池优化、**选择运行版本**（切换/回滚）、控制台（实时日志 + 命令输入）

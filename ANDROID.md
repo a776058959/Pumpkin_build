@@ -1,27 +1,27 @@
-# 在安卓手机上跑 Pumpkin（壳 App 方式）
+# 在安卓手机上跑 Pumpkin（南瓜坞 App 方式）
 
-本文说明如何用 **Pumpkin 壳 App** 在安卓手机上部署运行 Pumpkin（Rust 编写的 Minecraft 服务端）。壳本身很轻（APK 约 90KB），只负责下载、启动服务端二进制并显示控制台，内部**不含服务端**。
+本文说明如何用 **南瓜坞 App** 在安卓手机上部署运行 Pumpkin（Rust 编写的 Minecraft 服务端）。南瓜坞本身很轻（APK 约 90KB），只负责下载、启动服务端二进制并显示控制台，内部**不含服务端**。
 
-> 仓库：独立新仓库 <https://github.com/a776058959/Pumpkin_build>（不是 fork，只放壳源码与构建流水线，不保存上游代码）。
+> 仓库：独立新仓库 <https://github.com/a776058959/Pumpkin_build>（不是 fork，只放 App 源码与构建流水线，不保存上游代码）。
 
 ---
 
 ## 概述
 
-- 壳 APK 仅约 **90KB**，里面**没有服务端**，服务端二进制是运行时从 GitHub Releases 下载的。
+- 南瓜坞 APK 仅约 **90KB**，里面**没有服务端**，服务端二进制是运行时从 GitHub Releases 下载的。
 - `AndroidManifest` 里 `targetSdk=28`，这是本方案能直接执行私有目录内程序的关键（原理见文末）。
 - Release 附件分两类：
   - `pumpkin-android-arm64-<日期>`——服务端原生二进制（约 119MB），App 下载并运行它；
-  - `pumpkin-shell.apk`——壳安装包（约 90KB）。
+  - `pumpkin-shell.apk`——安装包（约 90KB）。
 
 ---
 
-## 一、安装壳 App
+## 一、安装南瓜坞 App
 
-1. 壳安装包有**永久固定**的下载链接（GitHub Releases 的 `latest/download` 别名，永远指向最新版，不用记日期文件名）：
+1. 安装包有**永久固定**的下载链接（GitHub Releases 的 `latest/download` 别名，永远指向最新版，不用记日期文件名）：
    - GitHub 直连：<https://github.com/a776058959/Pumpkin_build/releases/latest/download/pumpkin-shell.apk>
    - 国内加速镜像（在它前面拼一个前缀即可）：<https://ghfast.top/https://github.com/a776058959/Pumpkin_build/releases/latest/download/pumpkin-shell.apk>　或　<https://gh-proxy.com/https://github.com/a776058959/Pumpkin_build/releases/latest/download/pumpkin-shell.apk>
-2. Release 里只有两个附件：**`pumpkin-shell.apk`**（壳，约 90KB）和 **`pumpkin-android-arm64-<日期>`**（服务端二进制，约 119MB）；App 的「检查更新」会自动找后者。
+2. Release 里只有两个附件：**`pumpkin-shell.apk`**（南瓜坞，约 90KB）和 **`pumpkin-android-arm64-<日期>`**（服务端二进制，约 119MB）；App 的「检查更新」会自动找后者。
 3. 下载 APK 传到手机（USB / 网盘 / 微信 / QQ 均可），点击安装。
 4. 系统提示时允许「安装未知应用」（不同品牌入口略有差异，一般会弹窗引导，或到「设置 → 应用/安全」开启）。
 5. 只支持 **arm64（64 位 ARM）**；32 位老手机、x86 模拟器装不了。
@@ -53,7 +53,7 @@ App 有**应用图标**（蓝紫渐变底 + 白色 Pumpkin 字母 P，自适应�
 - **启动方式切换**：普通模式 / Root 模式。
 - **下载源设置**：GitHub API 地址、仓库 owner/repo、下载镜像前缀三个输入框 + 保存按钮。下载源在此**显式可改**，不再需要长按。手机直连 GitHub 不通时，把 API 地址换成能返回同样 JSON 的镜像，并把下载镜像前缀填成例如 `https://ghfast.top/`（会拼在 `https://github.com/...` 前面）。
 - **清理数据**：清服务端版本 / 清游戏数据 / 全部清空三种粒度。
-- **关于**：壳版本号、服务端机器、电池优化设置、复制数据目录路径。
+- **关于**：南瓜坞版本号、服务端机器、电池优化设置、复制数据目录路径。
 - **「关于」卡片里有一行「诊断」**：显示 Android API 级别、模糊路径（`硬件 RenderNode` 或 `软件 Bitmap`）、模糊层尺寸、内容区尺寸。排查界面问题时，把这行**原样发出来**即可。
 
 首次使用按顺序操作：
@@ -144,7 +144,7 @@ App 有**应用图标**（蓝紫渐变底 + 白色 Pumpkin 字母 P，自适应�
 | 下载进度不动 / 直连 GitHub 不通 | 手机访问 GitHub 受限（网络被墙/代理限制）。**首选**：在「设置」页把 **API 地址**换成能返回相同 JSON 的镜像，并在「**下载镜像前缀**」填如 `https://ghfast.top/`（它会拼到 `https://github.com/...` 前面）；也可换网络（手机/电脑热点）或用电脑下好后手动放入对应位置 |
 | 下载到一半失败或文件不对 | 下载会**自动重试最多 3 次**，且安装前**校验 ELF 头与机器码 `0xB7`**，错误页面/不完整文件会直接报错，不会误装 |
 | 启动后日志出现 `Permission denied` | 普通模式的域豁免未生效（或设备情况特殊）。**改用 Root 模式**启动即可 |
-| 进程被系统杀掉 | 手机开了**电池优化**。到系统设置把本 App（或壳）设为「不受限制」，并尽量保持在前台 |
+| 进程被系统杀掉 | 手机开了**电池优化**。到系统设置把本 App 设为「不受限制」，并尽量保持在前台 |
 | 切换版本提示要先停止 | 服务端仍占用文件。先停止服务端再切换版本 |
 | 清理会删什么 | 见「清理数据」表——三种粒度各不相同，**点之前确认** |
 | 界面模糊异常 / 想报界面问题 | 到「设置 → 关于」复制**「诊断」**那一行（含 Android API 级别、模糊路径 `RenderNode/Bitmap`、模糊层尺寸、内容区尺寸），原样发出来即可 |
@@ -155,14 +155,14 @@ App 有**应用图标**（蓝紫渐变底 + 白色 Pumpkin 字母 P，自适应�
 
 - 旧文档里的 **Termux 方式仍然有效**，作为备选保留：用 F-Droid 版 Termux，把 `pumpkin-android-arm64-<日期>` 二进制放到 Termux 私有目录（`~/`），对 `/sdcard` 或 `~/storage`（noexec 挂载）一律不行。
 - 运行前 `termux-wake-lock`、关电池优化，尽量在前台会话运行。
-- **原理与壳一样**：Termux 能运行二进制，靠的同样是 `targetSdk<=28` 应用的 SELinux 域豁免，**不是 Termux 有特权**。Android 10+ 上普通模式能执行私有目录程序，和 Termux 是同一机制。
+- **原理与南瓜坞一样**：Termux 能运行二进制，靠的同样是 `targetSdk<=28` 应用的 SELinux 域豁免，**不是 Termux 有特权**。Android 10+ 上普通模式能执行私有目录程序，和 Termux 是同一机制。
 
 ---
 
 ## 十、原理说明
 
 - Android 10+ 只有 **`targetSdk<=28`** 的应用会被放进 `untrusted_app_27` SELinux 域，该域**允许对应用私有目录执行 execve**；`targetSdk>=29` 落在更受限的域，被 W^X 限制，不能从私有目录执行程序。
-- 壳因此把下载的服务端放在**私有目录**执行（普通模式即此机制）。
+- 南瓜坞因此把下载的服务端放在**私有目录**执行（普通模式即此机制）。
 - Root 模式进程落在 magisk/su 域，**不触碰 SELinux 策略**，故 `getenforce` 等检测仍显示 Enforcing，不会被发现；并且未来即使取消旧 targetSdk 豁免，Root 模式也依然可用。
 - Release 保留策略：**<1 个月全部保留；1–2 个月每周保留最后一个；2–12 个月每月保留最后一个；>1 年删除**。
 

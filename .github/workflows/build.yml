@@ -337,13 +337,13 @@ jobs:
           name: pumpkin-server-android-arm64-${{ steps.datetime.outputs.utc_date }}
           path: src/target/aarch64-linux-android/release/pumpkin
 
-  # 构建安卓壳 APK（不含服务端；服务端由 App 运行时从 Releases 下载）
+  # 构建南瓜坞 APK（不含服务端；服务端由 App 运行时从 Releases 下载）
   #
   # 注意：本 job 曾长期静默失败（配了 continue-on-error，workflow 整体仍显示 success，
-  # 但 release 里一直没有附 APK，导致老版本 App 检查更新时找不到壳的发布信息）。
-  # 原因是这里的 Gradle/JDK 没跟着壳工程升级：AGP 9.4.0 要求 Gradle >= 9.6 + JDK 21，
+  # 但 release 里一直没有附 APK，导致老版本 App 检查更新时找不到南瓜坞的发布信息）。
+  # 原因是这里的 Gradle/JDK 没跟着 App 工程升级：AGP 9.4.0 要求 Gradle >= 9.6 + JDK 21，
   # 旧配置的 8.9 / 17 会在 apply plugin 阶段直接抛 InvalidPluginException。
-  # 以后改壳工程的 AGP 版本时，务必同步这里的 gradle-version 与 java-version。
+  # 以后改 App 工程的 AGP 版本时，务必同步这里的 gradle-version 与 java-version。
   build-android-apk:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -353,7 +353,7 @@ jobs:
       stamp: ${{ steps.datetime.outputs.stamp }}
 
     steps:
-      # 壳源码就在本仓库，直接检出
+      # App 源码就在本仓库，直接检出
       - name: Checkout (shell sources)
         uses: actions/checkout@v4
         with:
@@ -452,7 +452,7 @@ jobs:
           STAMP="${{ needs.build-android-apk.outputs.stamp }}"
           if [ -z "$STAMP" ]; then
             STAMP="${UTC_DATE}-${UTC_TIME}"
-            echo "::warning::apk job 没产出时间戳（多半是构建失败），tag 退回当前时间 → 本次 release 不含可用的壳版本比对基准"
+            echo "::warning::apk job 没产出时间戳（多半是构建失败），tag 退回当前时间 → 本次 release 不含可用的南瓜坞版本比对基准"
           else
             UTC_DATE="${STAMP%%-*}"
             UTC_TIME="${STAMP##*-}"
@@ -501,7 +501,7 @@ jobs:
             - `pumpkin-windows-x86_64-legacy-${{ steps.timestamp.outputs.utc_date }}.exe` – Windows x86_64 旧 CPU 优化
             - `pumpkin-windows-arm64-${{ steps.timestamp.outputs.utc_date }}.exe` – Windows ARM64 构建（实验性）
             - `pumpkin-android-arm64-${{ steps.timestamp.outputs.utc_date }}` – Android ARM64 构建（aarch64-linux-android，Termux 可运行，实验性）
-            - `pumpkin-shell.apk` – 安卓壳 App（不含服务端，装好后在 App 内下载服务端版本；versionCode=${{ steps.timestamp.outputs.utc_date }}${{ steps.timestamp.outputs.utc_time }}）
+            - `pumpkin-shell.apk` – 南瓜坞 App（不含服务端，装好后在 App 内下载服务端版本；versionCode=${{ steps.timestamp.outputs.utc_date }}${{ steps.timestamp.outputs.utc_time }}）
           artifacts: "release_files/*"
           allowUpdates: false
           token: ${{ secrets.GITHUB_TOKEN }}

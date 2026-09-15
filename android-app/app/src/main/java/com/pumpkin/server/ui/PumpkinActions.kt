@@ -52,7 +52,7 @@ interface PumpkinActions {
 
     fun copyWorkDirFromUi()
 
-    fun checkShellUpdateFromUi()
+    fun checkAppUpdateFromUi()
 
     /** 保存下载源三件套；参数为 null 表示按空处理。 */
     fun saveSourceFromUi(api: String?, repo: String?, mirror: String?)

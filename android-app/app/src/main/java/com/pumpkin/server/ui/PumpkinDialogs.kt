@@ -42,8 +42,8 @@ object PumpkinDialogs {
     /** 通用二次确认（清理数据等）—— 确认型。 */
     const val CONFIRM = 6
 
-    /** 检查到壳有新版本，询问是否下载 —— 确认型。 */
-    const val SHELL_UPDATE = 7
+    /** 检查到南瓜坞有新版本，询问是否下载 —— 确认型。 */
+    const val APP_UPDATE = 7
 
     /**
      * 每个 kind 的「确定」按钮含义。

@@ -1,18 +1,18 @@
-# 壳自身的更新机制 — 曾经完全失效，以及为什么
+# 南瓜坞自身的更新机制 — 曾经完全失效，以及为什么
 
 > 记录于 2026-09-15。用户反馈「老版本 0.3.0 检查不到这次的更新」，
-> 排查后发现是**三个叠加的缺陷**，任何一个单独存在都会让壳的更新检查失效。
+> 排查后发现是**三个叠加的缺陷**，任何一个单独存在都会让更新检查失效。
 
 ## 症状
 
-旧版 App 点「检查壳更新」→ 弹出 **「没有找到壳的发布信息」**，永远查不到新版本。
+旧版 App 点「检查更新」→ 弹出 **「没有找到南瓜坞的发布信息」**，永远查不到新版本。
 
 ## 三个叠加的缺陷
 
-### 缺陷 1：CI 里的壳 APK 构建一直在静默失败
+### 缺陷 1：CI 里的南瓜坞 APK 构建一直在静默失败
 
 `build.yml` 的 `build-android-apk` job 写死了 **Gradle 8.9 + JDK 17**，
-但壳工程早已升级到 **AGP 9.4.0（要求 Gradle ≥ 9.6）+ JDK 21**。
+但 App 工程早已升级到 **AGP 9.4.0（要求 Gradle ≥ 9.6）+ JDK 21**。
 
 实际报错：
 
@@ -39,8 +39,8 @@ release 照常发布，只是**从来没有附上 APK**。
 GET /repos/{repo}/releases/latest
 ```
 
-本仓库的 Release 是**服务端构建和壳 APK 共用一个发布流**的，
-而服务端构建（8 个平台）比壳频繁得多。`latest` 只返回**最新那一个** release，
+本仓库的 Release 是**服务端构建和南瓜坞 APK 共用一个发布流**的，
+而服务端构建（8 个平台）比 App 频繁得多。`latest` 只返回**最新那一个** release，
 它经常只有服务端二进制、没有 APK：
 
 ```
@@ -49,7 +49,7 @@ assets: pumpkin-android-arm64-20260915, pumpkin-linux-*, pumpkin-windows-*.exe
         ← 没有任何 .apk
 ```
 
-代码遍历 assets 找 `.apk`，找不到就 `return null` → 用户看到「没有找到壳的发布信息」。
+代码遍历 assets 找 `.apk`，找不到就 `return null` → 用户看到「没有找到南瓜坞的发布信息」。
 带 APK 的那两个 release（`build-20260914-0548`、`Custom-20260914-0707`）都不是 latest，
 永远轮不到。
 
@@ -128,7 +128,7 @@ versionName=0.4.0+20260915-0440
 `build-android-apk` job 从长期 `failure` 变为 `success`，并产出
 `pumpkin-android-apk-20260915`（13.3 MB）。
 
-## 以后改壳工程时要记得
+## 以后改 App 工程时要记得
 
 - **改 AGP 版本 → 同步改 `build.yml` 里 `build-android-apk` 的 `gradle-version` 与 `java-version`。**
   这两处很容易脱节，而 `continue-on-error` 会让脱节悄无声息。
