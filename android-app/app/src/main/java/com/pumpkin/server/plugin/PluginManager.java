@@ -9,6 +9,8 @@ import com.pumpkin.plugin.PumpkinPlugin;
 
 import org.json.JSONObject;
 
+import com.pumpkin.server.Prefs;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -160,11 +162,11 @@ public final class PluginManager {
         }
 
         PumpkinPlugin plugin = (PumpkinPlugin) instance;
-        HostImpl host = new HostImpl(plugin.id());
+        HostImpl host = new HostImpl(plugin.getId());
         plugin.onLoad(host);
 
-        loaded.add(new LoadedPlugin(plugin.id(), plugin.name(), plugin.version(),
-                plugin.description()));
+        loaded.add(new LoadedPlugin(plugin.getId(), plugin.getName(), plugin.getVersion(),
+                plugin.getDescription()));
     }
 
     private String describe(Throwable t) {
