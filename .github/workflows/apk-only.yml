@@ -90,7 +90,9 @@ jobs:
           gradle :plugins:lan-address:jar --no-daemon --stacktrace
           JAR=$(ls plugins/lan-address/build/libs/*.jar | grep -v sources | head -1)
           echo "plugin jar: $JAR"
-          if unzip -l "$JAR" | grep -q 'com/pumpkin/plugin/'; then
+          # 注意要精确匹配 API 的类名：插件自己的包是 com.pumpkin.plugin.lanaddress，
+          # 它会天然命中 'com/pumpkin/plugin/' 这个前缀（本喵第一版就因此误报过）。
+          if unzip -l "$JAR" | grep -qE 'com/pumpkin/plugin/(PumpkinPlugin|PluginHost|PluginSetting|PluginKeys)'; then
             echo "::error::插件 jar 里混进了 plugin-api 的类（PumpkinPlugin/PluginHost）。"
             echo "::error::这些类只能由 App 提供，插件必须用 compileOnly 依赖，否则插件的 instanceof 会静默失败。"
             exit 1
