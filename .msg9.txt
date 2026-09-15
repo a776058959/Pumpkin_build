@@ -1,0 +1,10 @@
+fix: Kotlin val properties are private fields to Java, use the getters
+
+Build failed with "prefix has private access in MirrorOption" - six times.
+
+A `val` in a Kotlin primary constructor compiles to a private backing field plus a
+public getter. Java resolves `opt.prefix` to the field, not the getter, so it is a
+private-access error rather than a missing-member one. Reading through
+getPrefix()/getLabel()/getNote() is what actually works from Java; this is the same
+trap the Kotlin-side call sites never hit because Kotlin rewrites property access for
+you.

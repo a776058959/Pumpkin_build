@@ -222,11 +222,14 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         String current = Prefs.get(this, "app_update_mirror", "").trim();
         java.util.List<PumpkinDialogItem> items = new ArrayList<>();
         for (MirrorOption opt : MirrorOption.values()) {
-            boolean selected = current.equals(opt.prefix);
-            String title = opt.prefix.isEmpty() ? "官方直连（推荐）" : opt.label;
+            // Kotlin 的 val 属性从 Java 看是「私有字段 + 公开 getter」，
+            // 必须走 getPrefix()/getLabel()，直接写 opt.prefix 会报 private access。
+            String prefix = opt.getPrefix();
+            boolean selected = current.equals(prefix);
+            String title = prefix.isEmpty() ? "官方直连（推荐）" : opt.getLabel();
             // 官方直连给个说明；加速源用它自带的 note。
-            String summary = opt.prefix.isEmpty() ? "从 GitHub 官方下载，最快也最可信" : opt.note;
-            items.add(new PumpkinDialogItem(title, summary, selected, true, opt.prefix));
+            String summary = prefix.isEmpty() ? "从 GitHub 官方下载，最快也最可信" : opt.getNote();
+            items.add(new PumpkinDialogItem(title, summary, selected, true, prefix));
         }
         state.showListDialog(
                 PumpkinDialogs.APP_SOURCE,
