@@ -12,13 +12,8 @@
 
 package com.pumpkin.server.ui
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -27,10 +22,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import com.pumpkin.server.ui.pages.RunPage
 import com.pumpkin.server.ui.pages.SettingsPage
 import com.pumpkin.server.ui.pages.UpdatePage
@@ -100,30 +98,24 @@ fun PumpkinApp(
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.statusBars),
                 ) {
-                    // 页面切换加淡入淡出 + 轻微横移，方向跟着导航顺序走。
+                    // 三个页面**常驻组合**，切页只换可见性（外加一次交叉淡入）。
                     //
-                    // 以前这里是硬切：底栏胶囊在平滑滑动，内容却"啪"地整块换掉，
-                    // 两者节奏对不上 —— 看起来就像胶囊动画出了问题，其实是缺这一段过渡。
-                    // 时长（200-240ms）与胶囊弹簧的行程量级对齐。
-                    AnimatedContent(
-                        targetState = state.page,
-                        transitionSpec = {
-                            val dir = if (targetState >= initialState) 1 else -1
-                            (
-                                fadeIn(tween(200)) +
-                                    slideInHorizontally(tween(240)) { w -> dir * w / 12 }
-                                ).togetherWith(
-                                fadeOut(tween(140)) +
-                                    slideOutHorizontally(tween(240)) { w -> -dir * w / 12 },
-                            )
-                        },
-                        label = "page",
-                    ) { page ->
-                        when (page) {
-                            0 -> RunPage(state = state, actions = actions)
-                            1 -> UpdatePage(state = state, actions = actions)
-                            else -> SettingsPage(state = state, actions = actions)
-                        }
+                    // 以前是 when (state.page) 只组合当前页：每次切页都要从零组合一整页
+                    //（卡片、输入框、可滚动列…），那一下在 UI 线程上要几十毫秒。
+                    // 来回快点三个按钮时每点一次就重建一页 —— gfxinfo 实测正是
+                    //「约 15 次点击 / 17 次 Slow UI thread / 最差帧 150ms」。
+                    // 拖拽不触发切页，所以拖拽一直很顺，问题只在点击上。
+                    //
+                    // 现在页面第一次组合后就一直活着，切页几乎不花组合开销，只花一点绘制
+                    //（交叉淡入）—— 而 GPU 实测余量很大（99th 仅 12ms），正是该把活挪过去的地方。
+                    PageSlot(visible = state.page == 0) {
+                        RunPage(state = state, actions = actions)
+                    }
+                    PageSlot(visible = state.page == 1) {
+                        UpdatePage(state = state, actions = actions)
+                    }
+                    PageSlot(visible = state.page == 2) {
+                        SettingsPage(state = state, actions = actions)
                     }
                 }
             }
@@ -158,5 +150,42 @@ fun PumpkinApp(
             // 不受这里层级影响，这样放只是让「同一棵 Compose 树里只有一个对话框宿主」这件事直观。
             PumpkinDialogHost(state = state, actions = actions)
         }
+    }
+}
+
+/**
+ * 一页内容：**常驻组合**，只按可见性切换绘制，并做一次交叉淡入。
+ *
+ * 为什么要这么绕，而不是直接 `when (page)`：
+ * 直接判断页面只有在切页时才组合目标页，而组合一整页（卡片 / 输入框 / 可滚动列）
+ * 在 UI 线程上要几十毫秒 —— 手快连点底栏时每点一次就重建一页，掉帧就是这么来的。
+ * 常驻组合把这笔开销挪到首次进入，之后切页只剩绘制，而绘制侧（GPU）实测余量很大。
+ *
+ * 不可见时用 `drawWithContent` 直接不画，而不是 `alpha = 0f`：
+ * 后者仍会走完整的绘制流程，白花钱。
+ */
+@Composable
+private fun PageSlot(
+    visible: Boolean,
+    content: @Composable () -> Unit,
+) {
+    // 180ms 与底栏胶囊的行程量级对齐，避免内容先到位、胶囊还在滑的割裂感。
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "pageAlpha",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { this.alpha = alpha }
+            .drawWithContent {
+                // 完全透明就不画 —— 这三个页面始终在组合树里，能省一笔是一笔。
+                if (alpha > 0.01f) {
+                    drawContent()
+                }
+            },
+    ) {
+        content()
     }
 }
