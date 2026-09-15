@@ -97,7 +97,13 @@ data class PumpkinPalette(
     /** 该色相的亮色版。 */
     val light: PumpkinScheme,
 ) {
-    fun scheme(dark: Boolean): PumpkinScheme = if (dark) dark else light
+    /**
+     * 取这个色相在指定明暗下的那份颜色。
+     *
+     * 参数刻意叫 isDark 而不是 dark —— 叫 dark 会遮蔽同名的属性 [dark]，
+     * 于是 `if (dark) dark else light` 里两个 dark 都变成 Boolean，类型推断成 Any。
+     */
+    fun scheme(isDark: Boolean): PumpkinScheme = if (isDark) dark else light
 }
 
 /** 内置色相。列表顺序即设置页里的显示顺序。 */
