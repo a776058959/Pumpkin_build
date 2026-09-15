@@ -10,3 +10,9 @@
 android-app/build/
 android-app/app/build/
 android-app/.gradle/
+
+# 本机构建的产物（tools/build-local.ps1 输出：APK + 插件 dex + 商店索引）
+out/
+
+# 提交信息临时文件（用 -F 传长消息时产生；别提交进来）
+.git-msg.txt

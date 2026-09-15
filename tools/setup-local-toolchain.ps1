@@ -1,4 +1,4 @@
-# 装本机 Android 构建工具链（一次性）。
+﻿# 装本机 Android 构建工具链（一次性）。
 #
 # 为什么需要：本机没有 JDK / Android SDK / Gradle，所以以前每次改代码都得推到 GitHub
 # 让 Actions 编译，失败了还要「轮询 → 拉日志 → grep」一整圈。

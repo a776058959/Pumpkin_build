@@ -81,11 +81,14 @@ public final class PluginManager {
         if (!readme.exists()) {
             try {
                 java.io.FileWriter w = new java.io.FileWriter(readme, false);
-                w.write("把插件放在这个目录下，每个插件一个子目录：\n"
+                w.write("这个目录由「南瓜坞」自己管理，一般**不用手改** ——\n"
+                        + "装插件请走 App 里的「插件」页 →「插件商店」→「安装」。\n"
+                        + "\n"
+                        + "每个插件一个子目录：\n"
                         + "  <插件id>/plugin.json   内容是 {\"id\":\"...\",\"entry\":\"类的全名\"}\n"
                         + "  <插件id>/plugin.dex    插件代码（CI 会把插件编译成 dex）\n"
                         + "\n"
-                        + "改完插件后回 App 的「设置 → 插件」点「重新加载」。\n");
+                        + "手工放了文件之后，回「插件」页点「重新加载插件」。\n");
                 w.close();
             } catch (Exception ignored) {
                 // 写不了说明不影响功能
