@@ -914,7 +914,8 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             toast("请先暂停下载，再删除任务");
             return;
         }
-        confirm("删除下载任务会丢弃已经下载的部分，确定吗？", new Runnable() {
+        // 文案控制在 miuix 对话框正文宽度内一行放得下，否则「吗？」会被挤成孤字行。
+        confirm("已下载的部分会被丢弃，确定吗？", new Runnable() {
             @Override
             public void run() {
                 downloader.deleteTask();
