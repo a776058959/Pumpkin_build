@@ -97,6 +97,11 @@ fun PumpkinApp(
                     }
                 },
             )
+
+            // ---------- miuix 风格对话框（最上层，覆盖底栏） ----------
+            // 放在 Box 里最后一个，所以它渲染在底栏之上；WindowDialog 自身是独立窗口，
+            // 不受这里层级影响，这样放只是让「同一棵 Compose 树里只有一个对话框宿主」这件事直观。
+            PumpkinDialogHost(state = state, actions = actions)
         }
     }
 }

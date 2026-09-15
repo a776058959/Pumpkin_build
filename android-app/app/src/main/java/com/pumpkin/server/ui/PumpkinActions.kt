@@ -65,4 +65,20 @@ interface PumpkinActions {
     fun clearGameDataFromUi()
 
     fun clearAllFromUi()
+
+    // ---------------- 对话框 ----------------
+
+    /**
+     * 对话框里的列表项被点。
+     *
+     * @param kind 哪个对话框（PumpkinDialogs 常量），Java 侧据此分派。
+     * @param tag  该行的业务标识（版本 tag 等）；纯确认型对话框不会走这里。
+     */
+    fun onDialogItemFromUi(kind: Int, tag: String?)
+
+    /** 对话框的确定按钮。仅确认型（isList == false）会触发。 */
+    fun onDialogPositiveFromUi(kind: Int)
+
+    /** 取消按钮，以及点外部 / 返回键关闭。Java 侧应在这里清理 pending 状态。 */
+    fun onDialogDismissedFromUi(kind: Int)
 }

@@ -113,6 +113,60 @@ class PumpkinUiState {
     /** 已安装版本 tag 列表。 */
     val installedTags = mutableStateListOf<String>()
 
+    // ---------------------------------------------------------------- 对话框
+
+    /**
+     * 对话框类型。0 表示不显示。
+     *
+     * 为什么用「一个 kind + 一组字段」而不是给每个对话框建一个对象：
+     * 这些对话框的内容全部由 Java 侧的现有业务逻辑填（版本列表、模式选项…），
+     * 逻辑不动，只把「画」的部分从原生 AlertDialog 换成 miuix 组件。
+     * Java 侧仍然是唯一知道「哪个 kind 对应什么行为」的地方，
+     * Compose 只负责把 state 画出来并把点击回传。
+     */
+    var dialogKind by mutableIntStateOf(0)
+
+    var dialogTitle by mutableStateOf<String?>(null)
+    var dialogMessage by mutableStateOf<String?>(null)
+
+    /** 列表型对话框的条目；空表示这是纯确认型对话框。 */
+    val dialogItems = mutableStateListOf<PumpkinDialogItem>()
+
+    /** 按钮文案；null 表示不显示该按钮。 */
+    var dialogPositive by mutableStateOf<String?>(null)
+    var dialogNegative by mutableStateOf<String?>(null)
+
+    /** 是否有对话框正在显示。读 dialogKind 所以能触发重组。 */
+    val dialogVisible: Boolean
+        get() = dialogKind != 0
+
+    /** 打开一个确认型对话框（只有标题/正文 + 按钮）。 */
+    fun showConfirmDialog(kind: Int, title: String, message: String?, positive: String, negative: String?) {
+        dialogItems.clear()
+        dialogKind = kind
+        dialogTitle = title
+        dialogMessage = message
+        dialogPositive = positive
+        dialogNegative = negative
+    }
+
+    /** 打开一个列表型对话框。 */
+    fun showListDialog(kind: Int, title: String, message: String?, items: List<PumpkinDialogItem>) {
+        dialogItems.clear()
+        dialogItems.addAll(items)
+        dialogKind = kind
+        dialogTitle = title
+        dialogMessage = message
+        dialogPositive = null
+        dialogNegative = "取消"
+    }
+
+    /** 关闭对话框。 */
+    fun dismissDialog() {
+        dialogKind = 0
+        dialogItems.clear()
+    }
+
     // ---------------------------------------------------------------- 一次性事件
 
     /**

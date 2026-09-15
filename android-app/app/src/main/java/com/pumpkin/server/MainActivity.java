@@ -1,7 +1,6 @@
 package com.pumpkin.server;
 
 import android.Manifest;
-import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.DialogInterface;
@@ -41,6 +40,9 @@ import java.util.List;
 
 import androidx.activity.ComponentActivity;
 
+import com.pumpkin.server.ui.PumpkinDialogItem;
+import com.pumpkin.server.ui.PumpkinDialogs;
+
 /**
  * 轻壳主界面：底部悬浮玻璃导航栏 + 三个页面（运行 / 更新 / 设置）。
  * 壳本身不含服务端，联网从 Releases 下载、切换、回滚、清理版本。
@@ -76,6 +78,17 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     private UpdateClient.Release selected;
     private volatile boolean busy;
     private volatile boolean cancelRequested;
+
+    // ---------------------------------------------------------------- 对话框挂起状态
+    //
+    // miuix 对话框是异步的（用户点了才回调），所以要弹出的那一刻先在这里存下「确定后干什么」。
+    // 同一时刻只会有一个对话框，所以每个用途一个字段就够，不需要队列。
+
+    /** confirm() 要执行的动作，点「确定」时跑。 */
+    private Runnable pendingConfirm;
+
+    /** 壳更新对话框里要下载的地址，点「下载」时打开。 */
+    private String pendingShellUrl;
 
     private final Runnable ticker = new Runnable() {
         @Override
@@ -436,6 +449,75 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         });
     }
 
+    // ================================================================ 对话框回调
+    //
+    // miuix 对话框只负责「画」，点完之后回到这里按 kind 分派。
+    // kind 的含义见 PumpkinDialogs；新增对话框时这里要加一个 case。
+
+    @Override
+    public void onDialogItemFromUi(int kind, String tag) {
+        state.dismissDialog();
+        switch (kind) {
+            case PumpkinDialogs.START_MODE:
+                applyStartMode(tag);
+                break;
+            case PumpkinDialogs.PICK_DOWNLOAD:
+                applyVersionSelection(tag);
+                break;
+            case PumpkinDialogs.PICK_RUN:
+                applyRunVersion(tag);
+                break;
+            case PumpkinDialogs.PICK_DELETE:
+                applyDeleteVersion(tag);
+                break;
+            default:
+                // 确认型对话框不该产生 item 回调；列表型遇到未知 kind 说明有分支漏了。
+                toast("未处理的对话框操作（kind=" + kind + "）");
+                break;
+        }
+    }
+
+    @Override
+    public void onDialogPositiveFromUi(int kind) {
+        state.dismissDialog();
+        switch (kind) {
+            case PumpkinDialogs.NEED_STOP:
+                stopThenDownload();
+                break;
+            case PumpkinDialogs.SHELL_UPDATE:
+                if (pendingShellUrl != null) {
+                    openUrl(pendingShellUrl);
+                    pendingShellUrl = null;
+                }
+                break;
+            case PumpkinDialogs.CONFIRM:
+                Runnable action = pendingConfirm;
+                pendingConfirm = null;
+                if (action != null) {
+                    action.run();
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    @Override
+    public void onDialogDismissedFromUi(int kind) {
+        state.dismissDialog();
+        // 取消时把挂起状态清掉，否则下次弹同一个对话框会跑到上一次残留的动作上。
+        switch (kind) {
+            case PumpkinDialogs.CONFIRM:
+                pendingConfirm = null;
+                break;
+            case PumpkinDialogs.SHELL_UPDATE:
+                pendingShellUrl = null;
+                break;
+            default:
+                break;
+        }
+    }
+
     private static String fmtSize(long bytes) {
         if (bytes < 1024) {
             return bytes + " B";
@@ -546,45 +628,53 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     }
 
     private void showModeDialog() {
-        final String[] items = new String[]{
-                "普通模式 — App 直接启动（依赖 targetSdk 28 的 SELinux 豁免）",
-                "Root 模式 — 通过 su 启动（不动 SELinux，不会被检测到）"
-        };
-        new AlertDialog.Builder(this)
-                .setTitle("选择服务端启动方式")
-                .setMessage("普通模式开箱即用。Root 模式通过 su 域运行，不受「私有目录禁止执行」的限制，"
-                        + "适合普通模式失效时使用（需要 Magisk 授权，首次会弹窗）。")
-                .setItems(items, new DialogInterface.OnClickListener() {
+        // miuix 风格对话框：这里只负责填「内容」，点击回到 onDialogItemFromUi 按 kind 分派。
+        // 原来用 AlertDialog.setItems 的写法整个删掉了 —— 系统原生样式与 miuix 主界面不搭。
+        boolean rootMode = Prefs.getBool(this, "root_mode", false);
+        List<PumpkinDialogItem> items = new ArrayList<>();
+        items.add(new PumpkinDialogItem(
+                "普通模式",
+                "App 直接启动（依赖 targetSdk 28 的 SELinux 豁免）",
+                !rootMode, true, "normal"));
+        items.add(new PumpkinDialogItem(
+                "Root 模式",
+                "通过 su 启动（不动 SELinux，不会被检测到）",
+                rootMode, true, "root"));
+        state.showListDialog(
+                PumpkinDialogs.START_MODE,
+                "选择服务端启动方式",
+                "普通模式开箱即用。Root 模式通过 su 域运行，不受「私有目录禁止执行」的限制，"
+                        + "适合普通模式失效时使用（需要 Magisk 授权，首次会弹窗）。",
+                items);
+    }
+
+    /** 启动方式对话框选中了一项。tag 为 "normal" 或 "root"。 */
+    private void applyStartMode(String tag) {
+        if ("normal".equals(tag)) {
+            Prefs.putBool(this, "root_mode", false);
+            toast("已切换到普通模式");
+            refresh();
+            return;
+        }
+        toast("正在检测 root 授权…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final boolean ok = RootHelper.available();
+                ui.post(new Runnable() {
                     @Override
-                    public void onClick(DialogInterface d, int which) {
-                        if (which == 0) {
-                            Prefs.putBool(MainActivity.this, "root_mode", false);
-                            toast("已切换到普通模式");
-                            refresh();
-                            return;
+                    public void run() {
+                        if (ok) {
+                            Prefs.putBool(MainActivity.this, "root_mode", true);
+                            toast("已切换到 Root 模式");
+                        } else {
+                            toast("未获得 root 权限（su 不可用或未授权）");
                         }
-                        toast("正在检测 root 授权…");
-                        new Thread(new Runnable() {
-                            @Override
-                            public void run() {
-                                final boolean ok = RootHelper.available();
-                                ui.post(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        if (ok) {
-                                            Prefs.putBool(MainActivity.this, "root_mode", true);
-                                            toast("已切换到 Root 模式");
-                                        } else {
-                                            toast("未获得 root 权限（su 不可用或未授权）");
-                                        }
-                                        refresh();
-                                    }
-                                });
-                            }
-                        }, "root-check").start();
+                        refresh();
                     }
-                })
-                .show();
+                });
+            }
+        }, "root-check").start();
     }
 
     // ================================================================ 版本管理
@@ -620,32 +710,58 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             toast("先点「检查更新」");
             return;
         }
-        final String cur = versions.currentTag();
-        final String[] items = new String[available.size()];
-        for (int i = 0; i < available.size(); i++) {
-            UpdateClient.Release r = available.get(i);
-            StringBuilder sb = new StringBuilder();
-            sb.append(r.tag.equals(cur) ? "● " : "○ ").append(r.tag);
+        String cur = versions.currentTag();
+        String selectedTag = selected == null ? null : selected.tag;
+        List<PumpkinDialogItem> items = new ArrayList<>();
+        for (UpdateClient.Release r : available) {
+            // 语义分工要清楚，否则用户分不清勾代表什么：
+            //   勾      = 「将要下载的这个」（也就是当前选择，点击会改它）
+            //   副文案  = 客观状态（多大、是否已下载、是不是正在跑的版本）
+            // 之前用「● 已运行 / ○ 未运行」前缀，把「已运行」和「已选择」混在一个符号里，
+            // 用户看不出版本列表里的记号到底指哪个。
+            StringBuilder sum = new StringBuilder();
             if (r.binarySize > 0) {
-                sb.append("　").append(fmtSize(r.binarySize));
+                sum.append(fmtSize(r.binarySize));
+            }
+            if (r.tag.equals(cur)) {
+                appendWithSep(sum, "正在运行");
             }
             if (versions.isInstalled(r.tag)) {
-                sb.append("　[已下载]");
+                appendWithSep(sum, "已下载");
             }
-            items[i] = sb.toString();
+            items.add(new PumpkinDialogItem(
+                    r.tag,
+                    sum.length() == 0 ? null : sum.toString(),
+                    r.tag.equals(selectedTag),
+                    true,
+                    r.tag));
         }
-        new AlertDialog.Builder(this)
-                .setTitle("选择要下载的版本")
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int which) {
-                        selected = available.get(which);
-                        updateVersionHint();
-                        refresh();
-                        toast("已选中 " + selected.tag);
-                    }
-                })
-                .show();
+        state.showListDialog(
+                PumpkinDialogs.PICK_DOWNLOAD,
+                "选择要下载的版本",
+                null,
+                items);
+    }
+
+    /** 往副文案里追加一段，自动补分隔符。 */
+    private static void appendWithSep(StringBuilder sb, String part) {
+        if (sb.length() > 0) {
+            sb.append("　·　");
+        }
+        sb.append(part);
+    }
+
+    /** 下载版本列表里选了一项。 */
+    private void applyVersionSelection(String tag) {
+        for (UpdateClient.Release r : available) {
+            if (r.tag.equals(tag)) {
+                selected = r;
+                updateVersionHint();
+                refresh();
+                toast("已选中 " + r.tag);
+                return;
+            }
+        }
     }
 
     private void doCheck() {
@@ -705,26 +821,26 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             return;
         }
         if (PumpkinServer.get().isRunning()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("需要先停止服务端")
-                    .setMessage("更新会替换服务端程序文件，需要先停止正在运行的服务器。要现在停止并继续更新吗？")
-                    .setPositiveButton("停止并更新", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface d, int w) {
-                            stopServer();
-                            ui.postDelayed(new Runnable() {
-                                @Override
-                                public void run() {
-                                    doDownloadInstall(selected);
-                                }
-                            }, 1200);
-                        }
-                    })
-                    .setNegativeButton("取消", null)
-                    .show();
+            state.showConfirmDialog(
+                    PumpkinDialogs.NEED_STOP,
+                    "需要先停止服务端",
+                    "更新会替换服务端程序文件，需要先停止正在运行的服务器。要现在停止并继续更新吗？",
+                    "停止并更新",
+                    "取消");
             return;
         }
         doDownloadInstall(selected);
+    }
+
+    /** 「需要先停止服务端」确认后：停服并延迟一点再开始下载。 */
+    private void stopThenDownload() {
+        stopServer();
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                doDownloadInstall(selected);
+            }
+        }, 1200);
     }
 
     private void doDownloadInstall(final UpdateClient.Release release) {
@@ -892,31 +1008,36 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             return;
         }
         final String cur = versions.currentTag();
-        final String[] items = new String[installed.size()];
+        List<PumpkinDialogItem> items = new ArrayList<>();
         for (int i = 0; i < installed.size(); i++) {
             VersionManager.Installed v = installed.get(i);
-            items[i] = (v.tag.equals(cur) ? "● " : "○ ") + v.tag + "　" + fmtSize(v.size);
+            items.add(new PumpkinDialogItem(
+                    v.tag,
+                    fmtSize(v.size),
+                    v.tag.equals(cur),
+                    true,
+                    v.tag));
         }
-        new AlertDialog.Builder(this)
-                .setTitle("选择要运行的版本")
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int which) {
-                        String tag = installed.get(which).tag;
-                        if (tag.equals(cur)) {
-                            toast("已经是当前版本");
-                            return;
-                        }
-                        if (PumpkinServer.get().isRunning()) {
-                            toast("请先停止服务端再切换版本");
-                            return;
-                        }
-                        versions.setCurrent(tag);
-                        toast("已切换到 " + tag);
-                        refresh();
-                    }
-                })
-                .show();
+        state.showListDialog(
+                PumpkinDialogs.PICK_RUN,
+                "选择要运行的版本",
+                PumpkinServer.get().isRunning() ? "服务端正在运行，切换前需要先停止。" : null,
+                items);
+    }
+
+    /** 选择运行版本。tag = 目标版本。 */
+    private void applyRunVersion(String tag) {
+        if (tag.equals(versions.currentTag())) {
+            toast("已经是当前版本");
+            return;
+        }
+        if (PumpkinServer.get().isRunning()) {
+            toast("请先停止服务端再切换版本");
+            return;
+        }
+        versions.setCurrent(tag);
+        toast("已切换到 " + tag);
+        refresh();
     }
 
     private void showDeleteDialog(final List<VersionManager.Installed> installed) {
@@ -924,26 +1045,35 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             toast("还没有安装任何版本");
             return;
         }
-        final String[] items = new String[installed.size()];
+        List<PumpkinDialogItem> items = new ArrayList<>();
+        String curTag = versions.currentTag();
         for (int i = 0; i < installed.size(); i++) {
-            items[i] = installed.get(i).tag;
+            VersionManager.Installed v = installed.get(i);
+            boolean isCur = v.tag.equals(curTag);
+            // 正在使用的版本不允许删 —— 置灰而不是点了才报错，减少一次无用点击。
+            items.add(new PumpkinDialogItem(
+                    v.tag,
+                    isCur ? "正在使用，不能删除" : fmtSize(v.size),
+                    false,
+                    !isCur,
+                    v.tag));
         }
-        new AlertDialog.Builder(this)
-                .setTitle("删除哪个版本？")
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int which) {
-                        String tag = installed.get(which).tag;
-                        if (tag.equals(versions.currentTag())) {
-                            toast("不能删除正在使用的版本");
-                            return;
-                        }
-                        versions.delete(tag);
-                        toast("已删除 " + tag);
-                        refresh();
-                    }
-                })
-                .show();
+        state.showListDialog(
+                PumpkinDialogs.PICK_DELETE,
+                "删除哪个版本？",
+                "删除后需要重新下载才能使用。",
+                items);
+    }
+
+    /** 删除版本。tag = 目标版本。 */
+    private void applyDeleteVersion(String tag) {
+        if (tag.equals(versions.currentTag())) {
+            toast("不能删除正在使用的版本");
+            return;
+        }
+        versions.delete(tag);
+        toast("已删除 " + tag);
+        refresh();
     }
 
     /** 启动时静默检查一次更新；有新版本就在「更新」角标上点个红点。 */
@@ -1046,20 +1176,16 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                                 newer = asset.updatedAt > installedAt + 120000L;
                             }
                             if (newer) {
-                                new AlertDialog.Builder(MainActivity.this)
-                                        .setTitle("壳有新版本")
-                                        .setMessage("服务器上发布了新的壳："
+                                pendingShellUrl = asset.downloadUrl;
+                                state.showConfirmDialog(
+                                        PumpkinDialogs.SHELL_UPDATE,
+                                        "壳有新版本",
+                                        "服务器上发布了新的壳："
                                                 + (asset.tag.isEmpty() ? asset.name : asset.tag)
                                                 + "\n当前已装：" + versionName()
-                                                + "\n\n要现在下载吗？下载完点开安装包覆盖安装即可。")
-                                        .setPositiveButton("下载", new DialogInterface.OnClickListener() {
-                                            @Override
-                                            public void onClick(DialogInterface d, int w) {
-                                                openUrl(asset.downloadUrl);
-                                            }
-                                        })
-                                        .setNegativeButton("以后", null)
-                                        .show();
+                                                + "\n\n要现在下载吗？下载完点开安装包覆盖安装即可。",
+                                        "下载",
+                                        "以后");
                             } else {
                                 toast("壳已是最新（" + versionName() + "）");
                             }
@@ -1090,17 +1216,11 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     }
 
     private void confirm(String message, final Runnable onYes) {
-        new AlertDialog.Builder(this)
-                .setTitle("请确认")
-                .setMessage(message)
-                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface d, int w) {
-                        onYes.run();
-                    }
-                })
-                .setNegativeButton("取消", null)
-                .show();
+        // 通用二次确认。这里存下要执行的动作，等用户在 miuix 对话框里点「确定」再跑
+        // （见 onDialogPositiveFromUi 的 CONFIRM 分支）。
+        // 同时只可能有一个对话框，所以单个字段就够，不需要队列。
+        pendingConfirm = onYes;
+        state.showConfirmDialog(PumpkinDialogs.CONFIRM, "请确认", message, "确定", "取消");
     }
 
     private void requestNotificationPermissionIfNeeded() {
