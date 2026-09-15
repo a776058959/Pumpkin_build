@@ -397,12 +397,10 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         // 就会每秒把「暂停 / 继续」覆盖回「下载」，造成按钮来回跳。
         updateDownloadButtons();
 
+        // 只说列表里看不到的信息（占用多少磁盘）。「已安装 N 个版本、可回滚」不写 ——
+        // 下面那张「本地版本」列表自己就列着，重复一遍是噪音。
         StringBuilder sb = new StringBuilder();
-        sb.append("已安装 ").append(installed.size()).append(" 个版本");
-        if (installed.size() > 1) {
-            sb.append("（可回滚）");
-        }
-        sb.append("　占用 ").append(fmtSize(VersionManager.dirSize(versions.getVersionsDir())));
+        sb.append("占用 ").append(fmtSize(VersionManager.dirSize(versions.getVersionsDir())));
         sb.append("\n游戏数据 ").append(fmtSize(VersionManager.dirSize(ServerPaths.workDir(this))));
         s.setVersionInstalled(sb.toString());
         // 只在真的没装过版本时给一句提示；装过之后列表本身就说明了情况，
@@ -745,7 +743,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     private void startServer() {
         requestNotificationPermissionIfNeeded();
         if (versions.currentTag() == null) {
-            toast("还没有安装服务端，先到「更新」页下载");
+            toast("还没有安装服务端");
             switchPage(PAGE_UPDATE);
             return;
         }
@@ -908,7 +906,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         if (cur != null && cur.equals(selected.tag)) {
             sb.append("\n（这就是当前运行的版本）");
         } else if (versions.isInstalled(selected.tag)) {
-            sb.append("\n（该版本已下载，到「运行」页可切换启用）");
+            sb.append("\n（该版本已下载）");
         }
         s.setVersionHint(sb.toString());
     }
@@ -916,7 +914,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     /** 选择要下载的版本（默认最新）。 */
     private void showVersionPicker() {
         if (available.isEmpty()) {
-            toast("先点「检查更新」");
+            toast("还没有拉到版本列表");
             return;
         }
         String cur = versions.currentTag();
@@ -1026,7 +1024,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         }
         if (selected == null) {
             doCheck();
-            toast("先点「检查更新」，再用「选择版本」挑一个");
+            toast("还没有选中版本");
             return;
         }
         if (PumpkinServer.get().isRunning()) {
@@ -1085,7 +1083,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 try {
                     versions.install(release.tag, file);
                     finishBusy();
-                    setDownloadHint("已安装 " + release.tag + "，到「运行」页启动或切换");
+                    setDownloadHint("已安装 " + release.tag);
                     toast("下载完成");
                     refresh();
                 } catch (Exception e) {
@@ -1098,8 +1096,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             public void onPaused(long done, long total) {
                 busy = false;
                 setDownloadHint("已暂停 " + fmtSize(done)
-                        + (total > 0 ? " / " + fmtSize(total) : "")
-                        + "\n点「继续」接着下，或点「删除下载任务」丢弃");
+                        + (total > 0 ? " / " + fmtSize(total) : ""));
                 updateDownloadButtons();
             }
 
@@ -1242,7 +1239,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             return;
         }
         if (PumpkinServer.get().isRunning()) {
-            toast("请先停止服务端再切换版本");
+            toast("请先停止服务端");
             return;
         }
         versions.setCurrent(tag);
@@ -1779,6 +1776,9 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // 先记下「装之前有没有装过」：install() 会把记录的版本号覆盖掉，
+                // 之后就只能说「已装好」—— 更新场景下这句话是错的（实测看到过）。
+                final boolean wasInstalled = !plugins.installedVersion(entry.id).isEmpty();
                 try {
                     plugins.install(entry, new UpdateClient.Progress() {
                         @Override
@@ -1803,7 +1803,11 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                         @Override
                         public void run() {
                             state.setPluginInstalling("");
-                            state.setPluginStoreStatus(entry.name + " 已装好，已自动重新加载。");
+                            // 短一点：「已自动重新加载」不用写 —— 下面那张卡片立刻就会
+                            // 显示它已经加载了，写了是重复。
+                            state.setPluginStoreStatus(wasInstalled
+                                    ? entry.name + " 已更新到 " + entry.version
+                                    : entry.name + " 已装好");
                             fillStore();
                             reloadPlugins();
                             refresh();

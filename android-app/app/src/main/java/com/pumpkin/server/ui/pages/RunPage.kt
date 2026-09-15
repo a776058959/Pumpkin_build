@@ -182,7 +182,7 @@ fun RunPage(
                         .padding(10.dp),
                 ) {
                     val display = if (state.logText.isEmpty()) {
-                        "（还没有日志）\n启动服务器后这里会实时输出"
+                        "（还没有日志）"
                     } else {
                         state.logText
                     }

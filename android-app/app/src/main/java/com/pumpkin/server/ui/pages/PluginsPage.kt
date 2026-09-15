@@ -313,12 +313,18 @@ private fun StoreSection(
                 style = MiuixTheme.textStyles.subtitle,
                 color = PumpkinColors.TextDim,
             )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = state.pluginStoreStatus.ifEmpty { "点「刷新」拉取可用插件列表。" },
-                style = MiuixTheme.textStyles.footnote1,
-                color = PumpkinColors.TextDim,
-            )
+            // 状态只在有事发生时才显示（正在拉取 / 拉到了几个 / 失败了）。
+            // 以前空态常驻一句「点「刷新」拉取可用插件列表。」——
+            // 「刷新」按钮就在这行字正下方，那是把按钮念了一遍。
+            if (state.pluginStoreStatus.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = state.pluginStoreStatus,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = PumpkinColors.TextDim,
+                )
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
             Button(
                 onClick = { actions.refreshPluginStoreFromUi() },
@@ -373,7 +379,7 @@ private fun StoreRow(
             when {
                 installing -> "正在安装…"
                 !installed -> "安装"
-                upToDate -> "已安装（点一下重装）"
+                upToDate -> "重新安装"
                 else -> "更新到 " + item.version
             },
         )

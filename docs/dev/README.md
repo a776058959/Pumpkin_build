@@ -53,6 +53,8 @@
 | `verify-plugin-crud.sh` | 插件页「增删改查」全流程，29 项断言一次跑完 |
 | `verify-stop-confirm.sh` | 插件改**行为**的验证（确认框弹不弹）——需要服务端在跑 |
 | `plugin-reset.sh` | 把插件状态清干净（跑验证脚本前先跑） |
+| `fake-plugin-version.sh` | 改插件「记录的版本」，模拟「装了旧版」，用来验证商店的「更新到 x.x」 |
+| `measure-stop-time.sh` | 量一次「点确定 → 服务端真的停下来」要多久（停服要存世界，是异步的） |
 | `install-server-for-test.sh` | 把推上去的服务端二进制装成 App 的一个版本（测试用旁路） |
 | `dump-ui.sh` | 界面 →「文字 @ 中心坐标」，用来算点击位置 |
 | `goto-page.sh` | 切页并确认真的切过去了 |
