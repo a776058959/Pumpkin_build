@@ -295,12 +295,6 @@ fun LiquidGlassNavBar(
                     offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
                 }
             },
-            onDragCancelled = {
-                updateValue(currentIndex.toFloat())
-                animationScope.launch {
-                    offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
-                }
-            },
             onDrag = { _, dragAmount ->
                 if (tabWidthPx > 0f && dragAmount.x != 0f) {
                     updateValue(
