@@ -123,7 +123,15 @@ public final class UpdateClient {
      */
     public String releaseAssetUrl(String tag, String assetName) throws IOException {
         String json = fetchText(apiBase(ctx) + "/repos/" + repo(ctx) + "/releases/tags/" + tag);
-        org.json.JSONObject rel = new org.json.JSONObject(json);
+        org.json.JSONObject rel;
+        try {
+            rel = new org.json.JSONObject(json);
+        } catch (org.json.JSONException e) {
+            // Android 的 org.json 把 JSONException 做成了受检异常。
+            // 对调用方来说「拿到的不是合法 JSON」和「网络坏了」是同一类事：
+            // 都是这次取索引没成功，重试或看提示即可。
+            throw new IOException("Release 信息不是合法 JSON：" + e.getMessage());
+        }
         org.json.JSONArray assets = rel.optJSONArray("assets");
         if (assets == null) {
             return null;

@@ -1,38 +1,92 @@
 #!/system/bin/sh
-# 重启应用后检查：运行页显示的地址是否等于插件覆盖值。
-# 重启是为了避开软键盘（用 UI 输入后键盘挡着底栏，切页不可靠）。
+# 验证「控制台字号」插件的覆盖值真的生效。
+#
+# 量的是运行页控制台那个 Text 节点的**高度**。
+# 没日志时它显示两行占位文字（「（还没有日志）\n启动服务器后这里会实时输出」），
+# 两行的行高只由字号决定，所以：
+#     倍率 1.0 → H        倍率 2.0 → ≈ 2H
+# 这是个只跟字号有关的量，不用去猜别的布局变化。
+#
+# 覆盖值直接用 root 写进 Prefs（走的是同一条读取路径：
+# MainActivity.render() 读 PluginKeys.CONSOLE_FONT_SCALE → state.consoleFontScale）。
+# 界面上的写入路径（插件页的输入框）另有人工验证步骤，见文末。
 
 P=com.pumpkin.server
-OV=/data/data/$P/shared_prefs/pumpkin_shell.xml
+XML=/data/data/$P/shared_prefs/pumpkin_shell.xml
+KEY=plugin_ov_console.fontScale
 
-am force-stop $P
-sleep 2
-am start -n $P/.MainActivity >/dev/null
-sleep 9
+console_height() {
+  uiautomator dump /sdcard/f.xml >/dev/null 2>&1
+  LINE=$(cat /sdcard/f.xml | tr '>' '\n' | grep '还没有日志' | head -1)
+  B=$(echo "$LINE" | grep -o 'bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' | head -1)
+  Y1=$(echo "$B" | sed 's/.*bounds="\[[0-9]*,\([0-9]*\)\].*/\1/')
+  Y2=$(echo "$B" | sed 's/.*\]\[[0-9]*,\([0-9]*\)\].*/\1/')
+  echo $((Y2 - Y1))
+}
 
-echo "=== 运行页首屏的地址行 ==="
-uiautomator dump /sdcard/r2.xml >/dev/null 2>&1
-cat /sdcard/r2.xml | tr '>' '\n' | grep -o 'text="[^"]*"' | grep -v 'text=""' \
-  | grep -E "Java|基岩|未检测" | sed 's/text="//;s/"$//' | sed 's/^/    /'
+measure() {
+  am force-stop $P
+  sleep 2
+  am start -n $P/.MainActivity >/dev/null
+  sleep 9
+  # 启动后停在运行页，直接量
+  console_height
+}
 
-echo
-echo "=== Prefs 里的插件覆盖值 ==="
-su -c "grep plugin_ov $OV" | sed 's/^/    /'
-
-echo
-echo "=== 对比结论 ==="
-HOST=$(su -c "grep -o 'plugin_ov_lan.host.>[^<]*' $OV" | sed 's/.*>//')
-if [ -n "$HOST" ]; then
-  if grep -q "$HOST" /sdcard/r2.xml; then
-    echo "    OK 运行页显示的地址里包含插件覆盖值：$HOST"
+set_scale() {
+  # 必须先停掉 App 再改文件：SharedPreferences 是内存里的，
+  # App 一退就会把内存里那份写回文件，把这里的修改盖掉。
+  am force-stop $P
+  sleep 2
+  if [ -z "$1" ]; then
+    su -c "sed -i '/$KEY/d' $XML"
   else
-    echo "    FAIL 运行页没有体现覆盖值，期望包含：$HOST"
+    if su -c "grep -q '$KEY' $XML"; then
+      su -c "sed -i 's|<string name=\"$KEY\">[^<]*</string>|<string name=\"$KEY\">$1</string>|' $XML"
+    else
+      su -c "sed -i 's|</map>|<string name=\"$KEY\">$1</string></map>|' $XML"
+    fi
+  fi
+  su -c "grep -o '$KEY.>[^<]*' $XML" 2>/dev/null | sed 's/^/    现在 Prefs 里：/'
+}
+
+echo "=== 1. 基线：没有覆盖值（内置 10.5sp） ==="
+set_scale ""
+H0=$(measure)
+echo "    控制台文字高度 = $H0 px"
+
+echo
+echo "=== 2. 覆盖成 2 倍 ==="
+set_scale 2
+H1=$(measure)
+echo "    控制台文字高度 = $H1 px"
+
+echo
+echo "=== 3. 结论 ==="
+if [ "$H0" -gt 0 ] && [ "$H1" -gt "$H0" ]; then
+  R=$(( H1 * 10 / H0 ))
+  echo "    H1/H0 = $R/10（期望 ≈ 20/10，也就是 2 倍）"
+  if [ "$R" -ge 18 ] && [ "$R" -le 22 ]; then
+    echo "    OK 插件覆盖值真的改变了控制台字号"
+  else
+    echo "    FAIL 高度变了但不是 2 倍，检查夹回逻辑（0.5~3，越界会夹回 1）"
   fi
 else
-  echo "    （没有覆盖值，运行页应显示自动探测到的地址）"
+  echo "    FAIL 没量到高度差（H0=$H0 H1=$H1）"
 fi
 
 echo
-echo "=== 崩溃检查 ==="
-logcat -d -t 200 2>/dev/null | grep "FATAL EXCEPTION" | head -3
+echo "=== 4. 还原 ==="
+set_scale ""
+
+echo
+echo "=== 5. 崩溃检查 ==="
+logcat -d -t 300 2>/dev/null | grep "FATAL EXCEPTION" | head -3
 echo "（无输出 = 没有崩溃）"
+
+# ---------------------------------------------------------------------------
+# 界面写入路径（人工/交互式验证，不在上面自动化里）：
+#   插件页 → 「插件设置」卡片 → 「字号倍率」输入框 → 输入 2 → 按返回收键盘
+#   → 回运行页，控制台字号应当立刻变大（onPluginSettingChangedFromUi 会 refresh）。
+# 之所以不写进脚本：输入文本要弹软键盘，键盘会盖住底栏，切页坐标就不稳了。
+# ---------------------------------------------------------------------------
