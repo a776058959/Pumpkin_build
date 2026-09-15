@@ -80,6 +80,14 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
      */
     private volatile boolean appUpdateBusy;
 
+    /**
+     * 已经下好、但因为「安装未知应用」没开而没能装上的更新包。
+     *
+     * 用户去设置里开完开关回到应用时，onResume 直接把它装上，
+     * 免得又要重新检查更新、重新下载十几 MB。
+     */
+    private File pendingInstallFile;
+
     private final Runnable ticker = new Runnable() {
         @Override
         public void run() {
@@ -100,6 +108,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         // 恢复配色偏好。Compose 侧读 state.paletteId 决定用哪套主题；
         // 取到空串（没存过）时由 PumpkinPalettes 回落到默认配色。
         state.setPaletteId(Prefs.get(this, "palette", ""));
+        state.setAppUpdateSourceLabel(appSourceLabel());
         // 界面交给 Compose：三页 + 液态玻璃底栏都在 ui 包里。
         // setContent 必须由 Kotlin 侧调用（@Composable lambda 带 $composer 参数，Java 造不出来）。
         com.pumpkin.server.ui.PumpkinUiBridge.launchPumpkinUi(this, state, this);
@@ -157,17 +166,36 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         Window window = getWindow();
         window.setStatusBarColor(Color.TRANSPARENT);
         window.setNavigationBarColor(Color.TRANSPARENT);
-        // 只用老的 setSystemUiVisibility：本应用 targetSdk=28，这套接口全程有效，
-        // 且比 setDecorFitsSystemWindows / InsetsController 稳得多（新接口曾导致启动即崩）。
-        // 不设 LIGHT_STATUS_BAR，即保持浅色图标，配深色背景。
-        window.getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        applySystemBarIcons();
         // 窗口底色设成当前配色渐变的顶色。主题默认是 Theme.Material 的 #303030，
         // 在 Compose 画出第一帧之前会先露出来 —— 冷启动时闪一条灰带就是它。
         // 主题里也设了同一颜色（themes.xml）作为兜底，这里按用户选的配色覆盖。
         window.setBackgroundDrawable(new ColorDrawable(paletteWindowColor()));
+    }
+
+    /**
+     * 系统栏图标颜色跟着配色走。
+     *
+     * 只用老的 setSystemUiVisibility：本应用 targetSdk=28，这套接口全程有效，
+     * 且比 setDecorFitsSystemWindows / InsetsController 稳得多（新接口曾导致启动即崩）。
+     *
+     * 亮色配色下必须加 LIGHT_STATUS_BAR / LIGHT_NAVIGATION_BAR ——
+     * 否则白色图标压在浅色渐变上根本看不见，用户会以为状态栏坏了。
+     */
+    private void applySystemBarIcons() {
+        Window window = getWindow();
+        if (window == null) {
+            return;
+        }
+        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+        if (com.pumpkin.server.ui.PumpkinPalettes.isLight(Prefs.get(this, "palette", ""))) {
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            // LIGHT_NAVIGATION_BAR 是 API 26 加的，本应用 minSdk 26，可以直接用。
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        }
+        window.getDecorView().setSystemUiVisibility(flags);
     }
 
     // 曾经这里有个 applyInsets(root)：把系统栏高度 setPadding 到 android.R.id.content。
@@ -179,6 +207,44 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         return com.pumpkin.server.ui.PumpkinPalettes.windowColor(Prefs.get(this, "palette", ""));
     }
 
+    /** App 更新下载源的显示名。空前缀 = 官方直连。 */
+    private String appSourceLabel() {
+        return MirrorOption.labelFor(Prefs.get(this, "app_update_mirror", ""));
+    }
+
+    /**
+     * 打开「App 更新下载源」选择框。
+     *
+     * 官方直连排第一并默认选中：它最快也最可信。国内连不上时再在这里挑一个加速源，
+     * 不必去动设置页那个「通用下载镜像前缀」（那是给服务端二进制用的，两者互不影响）。
+     */
+    public void showAppSourceDialogFromUi() {
+        String current = Prefs.get(this, "app_update_mirror", "").trim();
+        java.util.List<PumpkinDialogItem> items = new ArrayList<>();
+        for (MirrorOption opt : MirrorOption.values()) {
+            boolean selected = current.equals(opt.prefix);
+            String title = opt.prefix.isEmpty() ? "官方直连（推荐）" : opt.label;
+            // 官方直连给个说明；加速源用它自带的 note。
+            String summary = opt.prefix.isEmpty() ? "从 GitHub 官方下载，最快也最可信" : opt.note;
+            items.add(new PumpkinDialogItem(title, summary, selected, true, opt.prefix));
+        }
+        state.showListDialog(
+                PumpkinDialogs.APP_SOURCE,
+                "App 更新下载源",
+                "下载 App 更新包时先试哪个源。选中的源如果失败，仍会自动往后面的源回退。",
+                items);
+    }
+
+    /** App 更新下载源选了一项。tag 是镜像前缀，空串代表官方直连。 */
+    private void applyAppSource(String prefix) {
+        String p = prefix == null ? "" : prefix.trim();
+        Prefs.put(this, "app_update_mirror", p);
+        if (state != null) {
+            state.setAppUpdateSourceLabel(MirrorOption.labelFor(p));
+        }
+        toast("App 更新下载源已设为：" + MirrorOption.labelFor(p));
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -187,6 +253,16 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         // 倾斜高光由 miuix 的 rememberDeviceTilt 在 Compose 侧自理（见 LiquidGlassNavBar），
         // 这里不再需要自己开关传感器。
         refresh();
+
+        // 从「安装未知应用」设置页回来的情况：开关开了就把已经下好的包装上，
+        // 不让用户重新走一遍「检查更新 → 下载」。
+        if (pendingInstallFile != null
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && getPackageManager().canRequestPackageInstalls()) {
+            File ready = pendingInstallFile;
+            pendingInstallFile = null;
+            installApk(ready);
+        }
     }
 
     @Override
@@ -391,12 +467,13 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         if (state != null) {
             state.setPaletteId(pid);
         }
-        // 窗口底色要跟着换。不换的话，系统栏那一条会留着上一套配色的颜色 ——
-        // 界面已经变粉了、系统栏还是蓝的，看着像没生效。
+        // 窗口底色与系统栏图标都要跟着换。不换的话，系统栏那一条会留着上一套配色的颜色 ——
+        // 界面已经变成亮色了、状态栏还是白图标，看着就像坏了。
         Window window = getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(paletteWindowColor()));
         }
+        applySystemBarIcons();
         toast("已切换配色：" + com.pumpkin.server.ui.PumpkinPalettes.nameOf(pid));
     }
 
@@ -470,6 +547,9 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 break;
             case PumpkinDialogs.PICK_DELETE:
                 applyDeleteVersion(tag);
+                break;
+            case PumpkinDialogs.APP_SOURCE:
+                applyAppSource(tag);
                 break;
             default:
                 // 确认型对话框不该产生 item 回调；列表型遇到未知 kind 说明有分支漏了。
@@ -1240,7 +1320,10 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                             ui.post(new Runnable() {
                                 @Override
                                 public void run() {
-                                    state.setAppUpdateProgress(f);
+                                    // 总大小未知（没给 Content-Length）时传 -1：
+                                    // Compose 侧据此隐藏进度条，只显示已下载量，
+                                    // 而不是把进度条钉在 0% 让人以为卡死。
+                                    state.setAppUpdateProgress(total > 0 ? f : -1f);
                                     state.setAppUpdateText(total > 0
                                             ? "正在下载更新包 " + fmtSize(done) + " / " + fmtSize(total)
                                             : "正在下载更新包 " + fmtSize(done));
@@ -1301,7 +1384,9 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         // 没开「安装未知应用」时先引导去开，否则调起安装器也只是白弹一下。
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && !getPackageManager().canRequestPackageInstalls()) {
-            final File target = apk;
+            // 记住这个包：用户去设置里开完开关回来，onResume 会直接把它装上，
+            // 不用重新检查更新、再下一次十几 MB。
+            pendingInstallFile = apk;
             pendingConfirm = new Runnable() {
                 @Override
                 public void run() {
@@ -1309,19 +1394,17 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                         startActivity(new Intent(
                                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                                 Uri.parse("package:" + getPackageName())));
-                        toast("请允许本应用安装应用，然后回到这里再点一次「检查更新」");
                     } catch (Exception e) {
                         toast("请到系统设置里允许本应用安装未知应用");
                     }
-                    // 顺带把已经下好的包位置告诉用户，实在不行可以手动装
-                    toast("安装包已下载到：" + target.getAbsolutePath());
                 }
             };
             state.showConfirmDialog(
                     PumpkinDialogs.CONFIRM,
                     "需要先允许安装应用",
                     "系统还没允许南瓜坞安装应用，所以装不了更新。"
-                            + "\n\n点「去设置」打开开关后，回来再点一次「检查更新」即可。",
+                            + "\n\n点「去设置」打开开关，回来就会自动安装（不用重新下载）。"
+                            + "\n\n安装包已经在：" + apk.getAbsolutePath(),
                     "去设置",
                     "以后");
             return;

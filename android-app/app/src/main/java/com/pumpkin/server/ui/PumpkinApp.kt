@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import com.pumpkin.server.ui.pages.RunPage
 import com.pumpkin.server.ui.pages.SettingsPage
 import com.pumpkin.server.ui.pages.UpdatePage
@@ -51,15 +50,15 @@ fun PumpkinApp(
     // 组件通过 PumpkinColors.Accent / Text / TextDim 取到的就是这套方案的颜色。
     val palette = PumpkinPalettes.byId(state.paletteId)
 
-    PumpkinTheme(palette = palette, dark = true) {
+    PumpkinTheme(palette = palette) {
         // 底栏模糊的采样源：必须包住「所有会出现在底栏背后的内容」。
         val contentBackdrop = rememberLayerBackdrop()
 
-        val dark = LocalPumpkinDark.current
-        // 背景渐变两端取自配色方案。窗口底色也跟着 bgTop 走（见 MainActivity），
-        // 所以冷启动那一帧与这里画出来的顶色是同一个颜色，不会闪。
-        val bgTop = if (dark) palette.bgTop else Color(0xFFF2F4F9)
-        val bgBottom = if (dark) palette.bgBottom else Color(0xFFE6EAF3)
+        // 渐变两端直接用配色自带的颜色。深色/亮色由配色自己声明，
+        // 这里不再单独判断 —— 否则会出现「亮色配色 + 深色渐变」这种自相矛盾的组合。
+        // 窗口底色也跟着 bgTop 走（见 MainActivity），冷启动那一帧与这里画的顶色一致，不会闪。
+        val bgTop = palette.bgTop
+        val bgBottom = palette.bgBottom
 
         Box(modifier = Modifier.fillMaxSize()) {
             // ---------- 渐变背景（最底层，不进背板：玻璃底下也有底色可透） ----------

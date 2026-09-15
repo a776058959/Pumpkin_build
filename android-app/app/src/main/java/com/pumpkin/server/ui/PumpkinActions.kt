@@ -63,6 +63,9 @@ interface PumpkinActions {
     /** 点选某套配色方案；id 见 PumpkinPalettes，null 表示回落到默认。 */
     fun applyPaletteFromUi(id: String?)
 
+    /** 打开「App 更新下载源」选择框。 */
+    fun showAppSourceDialogFromUi()
+
     fun clearVersionsFromUi()
 
     fun clearGameDataFromUi()

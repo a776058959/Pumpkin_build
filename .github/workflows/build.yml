@@ -337,70 +337,26 @@ jobs:
           name: pumpkin-server-android-arm64-${{ steps.datetime.outputs.utc_date }}
           path: src/target/aarch64-linux-android/release/pumpkin
 
-  # 构建南瓜坞 APK（不含服务端；服务端由 App 运行时从 Releases 下载）
+  # ──────────────────────────────────────────────────────────────────────────
+  # App（南瓜坞 APK）**不再**在这条流水线里构建。
   #
-  # 注意：本 job 曾长期静默失败（配了 continue-on-error，workflow 整体仍显示 success，
-  # 但 release 里一直没有附 APK，导致老版本 App 检查更新时找不到南瓜坞的发布信息）。
-  # 原因是这里的 Gradle/JDK 没跟着 App 工程升级：AGP 9.4.0 要求 Gradle >= 9.6 + JDK 21，
-  # 旧配置的 8.9 / 17 会在 apply plugin 阶段直接抛 InvalidPluginException。
-  # 以后改 App 工程的 AGP 版本时，务必同步这里的 gradle-version 与 java-version。
-  build-android-apk:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    outputs:
-      # 把烧进 APK versionCode 的那个时间戳透出去，release job 复用它当 tag，
-      # 保证「tag 解析出的版本号」与「APK 内嵌的 versionCode」严格相等。
-      stamp: ${{ steps.datetime.outputs.stamp }}
-
-    steps:
-      # App 源码就在本仓库，直接检出
-      - name: Checkout (shell sources)
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set build stamp
-        id: datetime
-        shell: bash
-        run: |
-          # 同一个时间戳既用来命名产物，也通过 -PbuildStamp 烧进 APK 的 versionCode，
-          # 后面 release 的 tag 也复用它——三处必须一致，否则 App 端版本比较会错位。
-          echo "utc_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
-          echo "stamp=$(date -u +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.7.1'
-
-      - name: Build APK
-        working-directory: android-app
-        run: gradle assembleDebug --no-daemon --stacktrace -PbuildStamp=${{ steps.datetime.outputs.stamp }}
-
-      - name: Collect APK
-        shell: bash
-        run: |
-          mkdir -p apk-out
-          cp android-app/app/build/outputs/apk/debug/app-debug.apk \
-             "apk-out/pumpkin-shell-${{ steps.datetime.outputs.utc_date }}.apk"
-          ls -lh apk-out
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: pumpkin-android-apk-${{ steps.datetime.outputs.utc_date }}
-          path: apk-out/*.apk
+  # 理由：上游一有新提交这条流水线就跑，而 App 的代码极少变。为了发服务端二进制
+  #   每次顺带编一遍 App，纯属浪费（而且那个 job 曾经配着 continue-on-error 静默失败，
+  #   workflow 显示 success 但 Release 里根本没有 APK —— 排查时非常费劲）。
+  #
+  # 现在 App 由 `.github/workflows/apk-only.yml` 单独负责，**手动触发**，
+  # 改完 UI/修完 bug 需要发版时跑一次，勾上 publish 即发布。约一分钟。
+  #
+  # ⚠️ 连带影响：服务端的 Release 里不再带 APK，所以
+  #   `/releases/latest/download/pumpkin-shell.apk` 这个"永久链接"**不再可靠**
+  #   （latest 通常是服务端 Release）。取 App 请用：
+  #     - App 内「检查更新」（推荐）
+  #     - 或 Releases 页里最新的那个带 `pumpkin-shell.apk` 的发布
+  # ──────────────────────────────────────────────────────────────────────────
 
   # 统一发布 Release（仅当有更新时运行）
   release:
-    needs: [build, build-android, build-android-apk, check]
+    needs: [build, build-android, check]
     if: needs.check.outputs.changed == 'true' || github.event.inputs.force == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -439,24 +395,14 @@ jobs:
 
       # 获取构建时间戳
       #
-      # 优先复用 build-android-apk 的时间戳：tag 里的时间必须与烧进 APK versionCode 的
-      # 那个时间完全一致，否则 App 端按 tag 算出的版本号会永远大于自己，表现为
-      # 「每次都提示有新版本，装完还提示」。
-      # apk job 失败（continue-on-error）导致拿不到 stamp 时，退回当前时间。
+      # 这条流水线只发服务端二进制，所以 tag 里的时间不再需要跟任何 APK 的 versionCode 对齐
+      # （App 由 apk-only.yml 单独发布，那边保证 tag 与 versionCode 一致）。
       - name: Get build timestamp
         id: timestamp
         run: |
           UTC_DATE=$(date -u +'%Y%m%d')
           UTC_TIME=$(date -u +'%H%M')
           BEIJING_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M')
-          STAMP="${{ needs.build-android-apk.outputs.stamp }}"
-          if [ -z "$STAMP" ]; then
-            STAMP="${UTC_DATE}-${UTC_TIME}"
-            echo "::warning::apk job 没产出时间戳（多半是构建失败），tag 退回当前时间 → 本次 release 不含可用的南瓜坞版本比对基准"
-          else
-            UTC_DATE="${STAMP%%-*}"
-            UTC_TIME="${STAMP##*-}"
-          fi
           echo "utc_date=$UTC_DATE" >> $GITHUB_OUTPUT
           echo "utc_time=$UTC_TIME" >> $GITHUB_OUTPUT
           echo "beijing=$BEIJING_TIME" >> $GITHUB_OUTPUT
@@ -474,8 +420,7 @@ jobs:
               cp "$dir/pumpkin.exe" "release_files/pumpkin-$suffix.exe"
             fi
           done
-          # Android 安装包（APK）
-          find artifacts -name "*.apk" -exec cp {} release_files/pumpkin-shell.apk \;
+          # 这里**不再**附 APK：App 由 apk-only.yml 单独发布（见本文件上方那段说明）。
           ls -la release_files
 
       # 创建 Release
@@ -501,7 +446,10 @@ jobs:
             - `pumpkin-windows-x86_64-legacy-${{ steps.timestamp.outputs.utc_date }}.exe` – Windows x86_64 旧 CPU 优化
             - `pumpkin-windows-arm64-${{ steps.timestamp.outputs.utc_date }}.exe` – Windows ARM64 构建（实验性）
             - `pumpkin-android-arm64-${{ steps.timestamp.outputs.utc_date }}` – Android ARM64 构建（aarch64-linux-android，Termux 可运行，实验性）
-            - `pumpkin-shell.apk` – 南瓜坞 App（不含服务端，装好后在 App 内下载服务端版本；versionCode=${{ steps.timestamp.outputs.utc_date }}${{ steps.timestamp.outputs.utc_time }}）
+
+            南瓜坞 App（APK）不在这条流水线里发布 —— 它由 `Build Pumpkin App (APK only)`
+            单独构建与发布。取 App 请用 App 内的「检查更新」，或去 Releases 页找最新的
+            那个带 `pumpkin-shell.apk` 的发布。
           artifacts: "release_files/*"
           allowUpdates: false
           token: ${{ secrets.GITHUB_TOKEN }}

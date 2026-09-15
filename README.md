@@ -30,7 +30,7 @@
 
 | 路径 | 说明 |
 |---|---|
-| `.github/workflows/build.yml` | 主流水线：定时检查上游（每 2 小时）→ 有新提交才编译各平台 → 打包 APK → 发布 Release → 记录基线 |
+| `.github/workflows/build.yml` | 主流水线：定时检查上游（每 2 小时）→ 有新提交才编译各平台**服务端** → 发布 Release → 记录基线。**不构建 App** |
 | `.github/workflows/manual-build.yml` | 手动触发一次完整多平台构建（跳过上游检查） |
 | `.github/workflows/apk-only.yml` | 只重打包 App，不动服务端二进制，约 1 分钟出包（**改 UI 用这个**）。默认**只出 artifact 不发 Release**，要发必须勾 `publish` |
 | `android-app/` | 南瓜坞 App 源码（Java 业务层 + Compose/miuix 界面）。**不含服务端**，服务端由 App 运行时从 Releases 下载 |
@@ -59,14 +59,12 @@
 见 [Releases](../../releases)：
 
 - `pumpkin-<平台>-<日期>` —— 各平台服务端二进制（Android aarch64 / Linux / Windows，含 legacy 变体）。
-- `pumpkin-shell.apk` —— 南瓜坞 App。这个文件名是**永久下载链接**的一部分，不要改：
+- `pumpkin-shell.apk` —— 南瓜坞 App，出现在 **App 流水线**发布的 Release 里。
 
-  ```
-  https://github.com/a776058959/Pumpkin_build/releases/latest/download/pumpkin-shell.apk
-  ```
-
-  国内加速：在它前面拼一个前缀，例如
-  `https://ghfast.top/https://github.com/.../pumpkin-shell.apk`。
+> ⚠️ 因为两条流水线是分开的，服务端的 Release（更频繁）里**没有 APK**，
+> 所以 `releases/latest/download/pumpkin-shell.apk` 这个链接**不再可靠**（latest 通常是服务端发布）。
+> 取 App 请用 App 内的「检查更新」，或去 [Releases](../../releases) 页找最新的那个带
+> `pumpkin-shell.apk` 的发布。
 
 App 用仓库内固定的签名密钥（`android-app/app/pumpkin-signing.p12`）签名，所以新版本可以**直接覆盖安装**，
 不用卸载、也不会丢世界数据。注意该密钥是自签名测试用途、密码公开，**不要用于正式分发**。
@@ -97,7 +95,13 @@ App 的「检查更新」读的是 Releases，artifact 它看不见。曾经因�
 
 ## 开发时要留意
 
-- **改 `android-app/` 的 AGP 版本时，必须同步改 `build.yml` 里 `build-android-apk` 的
+- **服务端构建与 App 构建是分开的**：
+  - `Build Pumpkin (upstream + App APK)` —— 只发服务端二进制，由上游提交触发（或手动 `force`）。
+  - `Build Pumpkin App (APK only)` —— 只发 App，**手动触发**，改完 UI 需要发版时跑一次并勾 `publish`。
+  - 因此服务端的 Release **不带 APK**，`releases/latest/download/pumpkin-shell.apk`
+    这个链接不再可靠。取 App 请用 App 内的「检查更新」，或去 Releases 页找最新的
+    带 `pumpkin-shell.apk` 的发布。
+- **改 `android-app/` 的 AGP 版本时，必须同步改 `apk-only.yml` 里 `build-apk` 的
   `gradle-version` 与 `java-version`。** 这两处曾经脱节，加上那个 job 带 `continue-on-error: true`，
   于是它每一次构建都失败、workflow 却一直显示成功，Release 长期**没有附带 APK**。
   复盘见 [docs/app-self-update.md](docs/app-self-update.md)。

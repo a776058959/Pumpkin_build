@@ -92,8 +92,18 @@ class PumpkinUiState {
      * 共用一套进度会让界面互相覆盖。
      */
     var appUpdateVisible by mutableStateOf(false)
+
+    /**
+     * App 更新包的下载进度。
+     *
+     * **-1 表示总大小未知**（服务端没给 Content-Length）：这时界面隐藏进度条、只显示已下载量，
+     * 而不是把进度条钉在 0% —— 那看起来像卡死了。
+     */
     var appUpdateProgress by mutableFloatStateOf(0f)
     var appUpdateText by mutableStateOf("")
+
+    /** App 更新包的下载源显示名，例如「官方直连」或某个加速源。 */
+    var appUpdateSourceLabel by mutableStateOf("")
 
     /** 删除下载任务按钮可用性。 */
     var deleteTaskEnabled by mutableStateOf(false)

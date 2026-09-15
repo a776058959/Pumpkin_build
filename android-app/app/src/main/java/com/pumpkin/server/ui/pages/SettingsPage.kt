@@ -236,6 +236,15 @@ fun SettingsPage(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("检查更新") }
 
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = { actions.showAppSourceDialogFromUi() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    // 默认走官方直连（最快也最可信），下不动时再挑加速源。
+                    Text("更新下载源：" + state.appUpdateSourceLabel)
+                }
+
                 // App 更新包在应用内下载，进度就地显示 —— 这里不跳浏览器，
                 // 所以必须有进度反馈，否则点完「下载」之后界面毫无反应。
                 if (state.appUpdateVisible) {
@@ -245,11 +254,15 @@ fun SettingsPage(
                         style = MiuixTheme.textStyles.footnote1,
                         color = PumpkinColors.TextDim,
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        progress = state.appUpdateProgress,
-                    )
+                    // progress < 0 表示总大小未知（服务端没给 Content-Length）：
+                    // 这种时候不画进度条，免得它一直停在 0% 看着像卡死。
+                    if (state.appUpdateProgress >= 0f) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            progress = state.appUpdateProgress,
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))

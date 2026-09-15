@@ -45,13 +45,16 @@ object PumpkinDialogs {
     /** 检查到南瓜坞有新版本，询问是否下载 —— 确认型。 */
     const val APP_UPDATE = 7
 
+    /** 选择 App 更新包的下载源（官方直连 / 各加速源）—— 列表型。 */
+    const val APP_SOURCE = 8
+
     /**
      * 每个 kind 的「确定」按钮含义。
      * 列表型对话框点条目即生效（等同于确定并带上索引），
      * 确认型的确定按钮不带索引（索引传 -1）。
      */
     fun isList(kind: Int): Boolean = when (kind) {
-        PICK_DOWNLOAD, PICK_RUN, PICK_DELETE, START_MODE -> true
+        PICK_DOWNLOAD, PICK_RUN, PICK_DELETE, START_MODE, APP_SOURCE -> true
         else -> false
     }
 }

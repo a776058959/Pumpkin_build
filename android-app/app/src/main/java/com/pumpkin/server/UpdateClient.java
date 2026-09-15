@@ -419,11 +419,17 @@ public final class UpdateClient {
         }
         String raw = url.trim();
 
+        // 源顺序：用户为「App 更新」单独选的源 → 官方直连 → 通用镜像前缀 → 内置加速源。
+        //
+        // 官方直连排在前面是有意的。以前沿用服务端那套「上次成功的源优先」，
+        // 结果从某个慢镜像下十几 MB 的包会卡很久（实测卡在 3.3MB/13.7MB 几乎不动）。
+        // App 更新包是一次性小下载，先直连最快；连不上会自动往下换源。
         LinkedHashSet<String> prefixes = new LinkedHashSet<>();
-        String remembered = Prefs.get(ctx, "good_prefix", "");
-        if (remembered != null && !remembered.isEmpty()) {
-            prefixes.add(remembered);
+        String appSource = Prefs.get(ctx, "app_update_mirror", "");
+        if (appSource != null && !appSource.trim().isEmpty()) {
+            prefixes.add(appSource.trim());
         }
+        prefixes.add("");                                   // 官方直连
         String userMirror = Prefs.get(ctx, "download_mirror", "");
         if (userMirror != null && !userMirror.trim().isEmpty()) {
             prefixes.add(userMirror.trim());
@@ -439,9 +445,9 @@ public final class UpdateClient {
             }
             String full = prefix.isEmpty() ? raw : prefix + raw;
             try {
-                File f = downloadFileTo(full, appApkFile(), progress);
-                Prefs.put(ctx, "good_prefix", prefix);
-                return f;
+                // 刻意不写 good_prefix：那是「服务端二进制」记住的源，
+                // 拿 App 更新包的结果去覆盖它，会把服务端下载的优先级带偏。
+                return downloadFileTo(full, appApkFile(), progress);
             } catch (IOException e) {
                 last = e;
                 if (progress != null) {
@@ -467,6 +473,7 @@ public final class UpdateClient {
         InputStream in = conn.getInputStream();
         OutputStream out = new FileOutputStream(tmp, false);
         long done = 0;
+        IOException failure = null;
         try {
             byte[] buf = new byte[65536];
             int n;
@@ -481,6 +488,8 @@ public final class UpdateClient {
                 }
             }
             out.flush();
+        } catch (IOException e) {
+            failure = e;
         } finally {
             try {
                 in.close();
@@ -490,6 +499,14 @@ public final class UpdateClient {
                 out.close();
             } catch (Exception ignored) {
             }
+        }
+
+        // 失败或取消时把半截文件删掉：App 更新包不做断点续传，
+        // 留着它只会白占十几 MB，而且会让下次下载多一次无用写入。
+        // 放在关流之后删，避免在文件还打开着的时候 unlink。
+        if (failure != null) {
+            tmp.delete();
+            throw failure;
         }
 
         if (tmp.length() <= 0) {

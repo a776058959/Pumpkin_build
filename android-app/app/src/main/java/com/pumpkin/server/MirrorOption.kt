@@ -74,5 +74,19 @@ enum class MirrorOption(
             val p = prefix.trim()
             return entries.firstOrNull { it.prefix == p }
         }
+
+        /**
+         * 前缀对应的显示名，供 Java 侧直接调用。
+         *
+         * 空前缀统一叫「官方直连」（而不是 DIRECT 的 label「直连（不加速）」）——
+         * App 更新下载源那一栏里，「官方」比「不加速」更好懂。
+         * 用户自定义的前缀原样返回，免得显示成一个看不出是什么的选项。
+         */
+        @JvmStatic
+        fun labelFor(prefix: String?): String {
+            val p = prefix?.trim().orEmpty()
+            if (p.isEmpty()) return "官方直连"
+            return fromPrefix(p)?.label ?: p
+        }
     }
 }

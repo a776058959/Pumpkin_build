@@ -22,13 +22,15 @@
 
 ## 一、安装南瓜坞 App
 
-1. 安装包有**永久固定**的下载链接（GitHub Releases 的 `latest/download` 别名，永远指向最新版，不用记日期文件名）：
-   - GitHub 直连：<https://github.com/a776058959/Pumpkin_build/releases/latest/download/pumpkin-shell.apk>
-   - 国内加速镜像（在它前面拼一个前缀即可）：<https://ghfast.top/https://github.com/a776058959/Pumpkin_build/releases/latest/download/pumpkin-shell.apk>　或　<https://gh-proxy.com/https://github.com/a776058959/Pumpkin_build/releases/latest/download/pumpkin-shell.apk>
-2. Release 里只有两个附件：**`pumpkin-shell.apk`**（南瓜坞，约 90KB）和 **`pumpkin-android-arm64-<日期>`**（服务端二进制，约 119MB）；App 的「检查更新」会自动找后者。
-3. 下载 APK 传到手机（USB / 网盘 / 微信 / QQ 均可），点击安装。
-4. 系统提示时允许「安装未知应用」（不同品牌入口略有差异，一般会弹窗引导，或到「设置 → 应用/安全」开启）。
-5. 只支持 **arm64（64 位 ARM）**；32 位老手机、x86 模拟器装不了。
+1. 去 [Releases](https://github.com/a776058959/Pumpkin_build/releases) 页，找**最新的那个带
+   `pumpkin-shell.apk` 附件的发布**，下载这个 APK。
+   > ⚠️ 别再依赖 `releases/latest/download/pumpkin-shell.apk` 这个"永久链接"了。
+   > 服务端与 App 现在是**两条独立流水线**，服务端发布更频繁，`latest` 通常是一个
+   > **不带 APK** 的服务端发布，那个链接会 404。直接看 Releases 页更稳。
+2. 下载 APK 传到手机（USB / 网盘 / 微信 / QQ 均可），点击安装。
+3. 系统提示时允许「安装未知应用」（不同品牌入口略有差异，一般会弹窗引导，或到「设置 → 应用/安全」开启）。
+4. 只支持 **arm64（64 位 ARM）**；32 位老手机、x86 模拟器装不了。
+5. 装好之后**不用再手动下载**：App 里「设置 → 检查更新」会在应用内下载新版并直接调起系统安装器。
 
 ---
 

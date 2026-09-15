@@ -290,7 +290,15 @@ fun LiquidGlassNavBar(
                     currentIndex = targetIndex
                     onSelectedUpdated(targetIndex)
                 }
-                updateValue(targetIndex.toFloat())
+                // 只有「拖拽把值停在了两项之间」才补一次回中。
+                //
+                // 点击（手指按下即抬起）时 onDragStarted 已经把动画指向按下那一项，
+                // 值正在全速飞过去；此时再无条件 updateValue(targetIndex) 会取消这个
+                // 动画并用零速度重启同一个弹簧 —— 肉眼看到的就是"一顿"。
+                // 官方实现在这里不调 updateValue，所以点击是顺的。
+                if (abs(targetValue - targetIndex) > 0.001f) {
+                    updateValue(targetIndex.toFloat())
+                }
                 animationScope.launch {
                     offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
                 }
