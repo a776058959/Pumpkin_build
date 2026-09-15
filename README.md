@@ -54,6 +54,24 @@
 - 版本管理：多版本共存、切换运行版本、单独删除、回滚。
 - 自更新：检查 GitHub Releases 里带 `.apk` 的最新发布，提示下载覆盖安装。
 
+### APK 体积：约 1.25MB
+
+早期预估 3~5MB，是按「正常 release 构建（带 R8 删减）」算的。中途为了**只隔离 AOT 这一个变量**
+刻意关掉了 `isMinifyEnabled`，于是没有任何死代码消除与内联，依赖里每一个类都原样进包 ——
+APK 因此涨到 9.66MB。
+
+APK 构成（实测）：**dex 占 94%**（`classes.dex` 13.79MB + `classes2.dex` 13.7MB，压缩前 27.5MB），
+`res` 只占 0.4%（0.04MB），`lib` 0.2%，`assets` 0.1%。**体积大头完全在 dex**，跟资源无关。
+
+现在 `isMinifyEnabled=true` + `isShrinkResources=true`：**9.66MB → 1.25MB**（dex 9.08 → 1.06MB）。
+R8 同时带来内联优化，而 Compose 极度依赖内联，所以帧率也一起变好了。
+
+本应用**没有任何反射**（已 grep 确认无 `Class.forName` / `getMethod` / `newInstance` / `::class.java`），
+Compose / miuix / androidx 各自带 consumer 规则会自动合并，所以 R8 可以放心开。
+`app/proguard-rules.pro` 里只有两条规则，且都是为**可调试性**而非正确性：
+保留行号（崩溃堆栈要写进 `last_crash.txt`），以及对本应用类用 `-keepnames` 保名字
+（用 `-keepnames` 而不是 `-keep`，避免连带禁止优化、丢掉内联收益）。
+
 ## 产物
 
 见 [Releases](../../releases)：

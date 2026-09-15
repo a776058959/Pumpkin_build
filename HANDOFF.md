@@ -361,6 +361,76 @@ release 与 debug 用**同一把签名密钥**（`signingConfigs["fixed"]` / `pu
 - 两者都要 **`su`**：用 `shell` 用户跑 simpleperf 会 `Permission denied`。
 - 相关脚本：`tools/measure-nav-fps.sh`、`tools/profile-nav-tap.sh`、`tools/capture-nav-anim.sh`。
 
+## APK 体积与 R8（2026-09-15）
+
+### 体积构成（实测）
+
+| 类别 | 占比 |
+|---|---|
+| **dex（代码）** | **94%** —— `classes.dex` 13.79MB + `classes2.dex` 13.7MB（压缩前 27.5MB） |
+| res | 0.4%（0.04MB） |
+| lib | 0.2% |
+| assets / META-INF | 0.3% |
+
+**体积大头完全在 dex**，跟资源无关。这一点决定了优化方向（开 R8，而不是删资源）。
+
+### 为什么曾经是 9.66MB
+
+上一步为了「只隔离 AOT 这一个变量」，刻意把 `isMinifyEnabled` 设为 `false`。
+没有 R8 就没有死代码消除与内联，依赖里**每一个类**都原样进包
+（Compose 运行时 + material3 + miuix 全家桶含图标库）。
+早先「3~5MB」的预估是按正常 release 构建算的，那个数字本身没错。
+
+### 修复
+
+- `isMinifyEnabled = true` + `isShrinkResources = true`
+- 新增 `app/proguard-rules.pro`，只有两条规则，都是为**可调试性**：
+  - `-keepattributes SourceFile,LineNumberTable` —— 崩溃堆栈要写进 `last_crash.txt`，没行号没法定位
+  - `-keepnames class com.pumpkin.server.** { *; }` —— 用 `-keepnames` 而非 `-keep`：
+    后者会连带禁止优化、丢掉内联收益；而体积大头在依赖，不在本应用这几十个类
+- 敢开的前提：**本应用没有任何反射**（grep 确认无 `Class.forName` / `getMethod` /
+  `newInstance` / `::class.java`），Compose / miuix / androidx 各自带 consumer 规则
+
+### 中途报错与处理
+
+```
+> Optimized resource shrinking requires non-final IDs.
+```
+
+原因：`gradle.properties` 里有 `android.nonFinalResIds=false`（AGP 9 迁移遗留，无注释）。
+
+处理：加 `android.r8.optimizedResourceShrinking=false` 退回传统资源删减，
+**没有**去掉 `nonFinalResIds=false` —— 资源只占 0.4%，优化删减没有收益；
+dex 那 94% 由 `isMinifyEnabled` 负责，与这个开关无关。
+
+### 结果
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| APK | 9.66MB | **1.25MB** |
+| dex | 9.08MB | **1.06MB** |
+
+比早先 3~5MB 的预估还小很多。
+
+### 帧率同步改善（同一压力脚本：快速来回点底栏）
+
+| 版本 | Janky 帧 | 90th | 95th | 99th | Slow UI thread | Missed Vsync |
+|---|---|---|---|---|---|---|
+| debug 包 | 17 (6.75%) | 48ms | 93ms | 150ms | 17 | 8 |
+| release（未开 R8） | 12 (4.48%) | 20ms | 29ms | 69ms | 10 | 3 |
+| **release + R8** | **9 (3.66%)** | **19ms** | **26ms** | **53ms** | **6** | **1** |
+
+R8 的内联对 Compose 是实打实的收益 —— Compose 靠内联消除 lambda 分配与虚调用开销。
+
+### R8 冒烟测试（真机，6 项）
+
+启动不崩 / 三页可切 / **miuix 对话框正常** / 配色切换有效 / 下载源弹窗正常 / 全程无崩溃，
+另有 `logcat` 无 `ClassNotFound` / `NoClassDefFound`。
+
+> 一个坑：验证「检查更新」对话框时一度以为被 R8 删坏了，其实是**版本漂移** ——
+> 当时本地包比已发布的还新，检查更新只弹了 Toast「已是最新」，而 **uiautomator 抓不到 Toast**。
+> 发布一个更新的版本后对话框立刻正常。**用 uiautomator 验证时要注意 Toast 是抓不到的。**
+
 ## 关键约束（改代码前必读，全是踩过的坑）
 
 1. **targetSdk 必须是 28**。Android 10+ 只有 targetSdk ≤ 28 才允许 App 从私有目录 execve 服务端二进制。
