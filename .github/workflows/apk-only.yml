@@ -120,7 +120,10 @@ jobs:
           EOF
           echo "versionCode = \`$(echo "$STAMP" | tr -d '-')\`（由构建时间戳推导，与 tag 严格一致）" >> notes.md
 
+          # --repo 必须给：这个 job 没有 checkout，gh 在当前目录找不到 .git 会直接失败
+          # （failed to run git: fatal: not a git repository）。
           gh release create "Custom-$STAMP" \
             rel/pumpkin-shell.apk \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Custom Build $STAMP" \
             --notes-file notes.md
