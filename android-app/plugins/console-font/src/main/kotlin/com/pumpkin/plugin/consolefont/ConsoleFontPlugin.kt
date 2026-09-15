@@ -20,7 +20,7 @@ class ConsoleFontPlugin : PumpkinPlugin {
 
     override val name: String = "控制台字号"
 
-    override val version: String = "1.0"
+    override val version: String = "1.1"
 
     override val description: String = "调整运行页控制台里日志文字的大小（0.5~3 倍）。"
 
@@ -32,7 +32,7 @@ class ConsoleFontPlugin : PumpkinPlugin {
                 key = PluginKeys.CONSOLE_FONT_SCALE,
                 title = "字号倍率",
                 kind = PluginSetting.Kind.TEXT,
-                summary = "1 = 内置字号（10.5sp）；范围 0.5~3，超出会被夹回 1。",
+                summary = "1 = 内置字号，范围 0.5~3",
                 placeholder = "1.5",
             ),
         )

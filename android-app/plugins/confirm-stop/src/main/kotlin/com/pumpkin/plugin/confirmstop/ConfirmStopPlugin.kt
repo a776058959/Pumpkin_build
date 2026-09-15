@@ -25,10 +25,10 @@ class ConfirmStopPlugin : PumpkinPlugin {
 
     override val name: String = "停止前确认"
 
-    override val version: String = "1.0"
+    override val version: String = "1.1"
 
     override val description: String =
-        "点「停止」时先弹一次确认，避免误触把玩家踢下线。关掉它就恢复成一点即停。"
+        "点「停止」时先确认一次，避免误触把玩家踢下线。"
 
     override fun onLoad(host: PluginHost) {
         host.log("停止前确认插件已加载")
@@ -39,7 +39,7 @@ class ConfirmStopPlugin : PumpkinPlugin {
                 title = "停止前先确认",
                 kind = PluginSetting.Kind.TOGGLE,
                 defaultValue = "true",
-                summary = "关掉「确认」后，运行页的「停止」会一点即停 —— 玩家会被立刻断开。",
+                summary = "关掉后点「停止」会立刻断开玩家",
             ),
         )
     }

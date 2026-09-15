@@ -382,9 +382,9 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         s.setDirText("数据目录 " + ServerPaths.workDir(this).getAbsolutePath());
 
         boolean rootMode = Prefs.getBool(this, "root_mode", false);
-        s.setModeValue(rootMode
-                ? "Root 模式（su，不改 SELinux）"
-                : "普通模式（targetSdk 28 豁免）");
+        // 只写短名：这一行现在是设置主列表右侧的「当前值」，塞进括号里的解释会把行撑爆。
+        // 两种模式的差别在切换对话框里说。
+        s.setModeValue(rootMode ? "Root 模式" : "普通模式");
 
         String cur = versions.currentTag();
         List<VersionManager.Installed> installed = versions.listInstalled();
@@ -405,9 +405,9 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         sb.append("　占用 ").append(fmtSize(VersionManager.dirSize(versions.getVersionsDir())));
         sb.append("\n游戏数据 ").append(fmtSize(VersionManager.dirSize(ServerPaths.workDir(this))));
         s.setVersionInstalled(sb.toString());
-        s.setLocalCount(installed.isEmpty()
-                ? "还没有安装任何版本"
-                : "已安装 " + installed.size() + " 个，可单独删除其中一个");
+        // 只在真的没装过版本时给一句提示；装过之后列表本身就说明了情况，
+        // 「已安装 N 个，可单独删除其中一个」是在重复界面已经说清楚的事。
+        s.setLocalCount(installed.isEmpty() ? "还没有安装任何版本" : "");
 
         s.getInstalledTags().clear();
         for (VersionManager.Installed v : installed) {
@@ -428,6 +428,16 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             return;
         }
         if (index >= PAGE_RUN && index <= PAGE_SETTINGS) {
+            // 再点一次「设置」= 从二级页回到主列表，跟大多数 App 的底栏行为一致。
+            if (index == PAGE_SETTINGS && state != null && state.getPage() == PAGE_SETTINGS
+                    && state.getSettingsPane() != 0) {
+                state.setSettingsPane(0);
+                return;
+            }
+            // 离开设置页时把层级归零：回来应该看到主列表，而不是上次停在的那个二级页。
+            if (state != null && index != PAGE_SETTINGS) {
+                state.setSettingsPane(0);
+            }
             switchPage(index);
         }
     }
@@ -841,9 +851,9 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 rootMode, true, "root"));
         state.showListDialog(
                 PumpkinDialogs.START_MODE,
-                "选择服务端启动方式",
-                "普通模式开箱即用。Root 模式通过 su 域运行，不受「私有目录禁止执行」的限制，"
-                        + "适合普通模式失效时使用（需要 Magisk 授权，首次会弹窗）。",
+                "启动方式",
+                // 不写总述：两个选项各自的副标题已经把差别说清楚了。
+                null,
                 items);
     }
 
@@ -888,7 +898,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 ? "未选择要下载的版本"
                 : "选中：" + selected.tag + "　" + fmtSize(selected.binarySize));
         if (selected == null) {
-            s.setVersionHint("点「检查更新」获取可用版本列表");
+            s.setVersionHint("");
             return;
         }
         String cur = versions.currentTag();
@@ -1879,6 +1889,28 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 && state.getPluginInstalling().isEmpty()) {
             refreshPluginStoreFromUi();
         }
+    }
+
+    /** 切设置页的层级（见 pages/SettingsPanes）。 */
+    public void setSettingsPaneFromUi(int pane) {
+        if (state != null) {
+            state.setSettingsPane(pane);
+        }
+    }
+
+    /**
+     * 返回键：在设置页的二级菜单里时，先退回设置主列表，而不是直接退出 App。
+     *
+     * 这是二级菜单必须配的东西 —— 否则用户按返回键会**直接退出应用**，
+     * 而不只是退出这一层，用起来像踩空。
+     */
+    @Override
+    public void onBackPressed() {
+        if (state != null && state.getPage() == PAGE_SETTINGS && state.getSettingsPane() != 0) {
+            state.setSettingsPane(0);
+            return;
+        }
+        super.onBackPressed();
     }
 
     /** 把索引缓存灌进 Compose 状态，并把已安装的版本 / 启用状态对上。 */

@@ -78,6 +78,9 @@ interface PumpkinActions {
     /** 切插件页的分段（见 pages/PluginTabs：0=已安装 1=商店）。 */
     fun setPluginTabFromUi(tab: Int)
 
+    /** 切设置页的层级（见 pages/SettingsPanes：0=主列表，其余是二级页）。 */
+    fun setSettingsPaneFromUi(pane: Int)
+
     /** 安装或更新指定 id 的插件。全程只写 App 私有目录，不需要 root。 */
     fun installPluginFromUi(id: String)
 

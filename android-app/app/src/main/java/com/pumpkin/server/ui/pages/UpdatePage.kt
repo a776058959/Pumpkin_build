@@ -105,27 +105,26 @@ fun UpdatePage(
         // ---------------------------------------------------------------- 下载
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "下载",
-                    style = MiuixTheme.textStyles.subtitle,
-                    color = PumpkinColors.TextDim,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = state.downloadHint,
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = PumpkinColors.TextDim,
-                )
+                // 这一块**只在有事发生时才显示文字**：正在下载多少、装好了、失败了。
+                // 以前这里常驻一句「点「下载」开始。下载中按钮会变成「暂停」，暂停后才能删除
+                // 下载任务。」—— 那是把按钮自己的行为念了一遍，纯噪音。
+                if (state.downloadHint.isNotEmpty()) {
+                    Text(
+                        text = state.downloadHint,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = PumpkinColors.TextDim,
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 if (state.downloadProgressVisible) {
-                    Spacer(modifier = Modifier.height(12.dp))
                     LinearProgressIndicator(
                         modifier = Modifier.fillMaxWidth(),
                         progress = state.downloadProgress,
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
                 Button(
                     onClick = { actions.onDownloadButtonClickedFromUi() },
                     modifier = Modifier.fillMaxWidth(),
@@ -133,12 +132,14 @@ fun UpdatePage(
                     colors = ButtonDefaults.buttonColorsPrimary(),
                 ) { Text(state.installButtonText) }
 
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = { actions.onDeleteTaskClickedFromUi() },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = state.deleteTaskEnabled,
-                ) { Text("删除下载任务") }
+                // 只在能删的时候出现：不能删的时候画一个灰按钮，不如不给。
+                if (state.deleteTaskEnabled) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = { actions.onDeleteTaskClickedFromUi() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("删除下载任务") }
+                }
             }
         }
 
@@ -152,12 +153,14 @@ fun UpdatePage(
                     style = MiuixTheme.textStyles.subtitle,
                     color = PumpkinColors.TextDim,
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = state.localCount.ifEmpty { "还没有安装任何版本" },
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = PumpkinColors.TextDim,
-                )
+                if (state.localCount.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = state.localCount,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = PumpkinColors.TextDim,
+                    )
+                }
 
                 if (state.installedTags.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(10.dp))
@@ -170,14 +173,13 @@ fun UpdatePage(
                             modifier = Modifier.padding(vertical = 3.dp),
                         )
                     }
-                }
 
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = { actions.showDeleteDialogFromUi() },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = state.installedTags.isNotEmpty(),
-                ) { Text("删除已安装的版本") }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = { actions.showDeleteDialogFromUi() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("删除已安装的版本") }
+                }
             }
         }
     }

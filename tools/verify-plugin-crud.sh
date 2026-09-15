@@ -75,10 +75,28 @@ wait_for() {
 
 prefs() { su -c "grep -o '$1.>[^<]*' $XML" 2>/dev/null | sed 's/.*>//'; }
 
+# 量运行页控制台文字的高度。
+#
+# 要重试：切换页面后马上 dump，偶尔会赶上重组/过渡，dump 到的还是上一页，
+# 于是「找不到控制台节点」→ NONE。这一步曾经偶发失败过一次，看着像功能坏了，
+# 其实是测量时机 —— 所以这里量到为止，别让测量本身成为不确定性来源。
+measure_console() {
+  i=0
+  while [ $i -lt 4 ]; do
+    H=$(sh /data/local/tmp/ch.sh 2>/dev/null | sed 's/.*= //;s/ px//')
+    case "$H" in
+      ''|NONE) sleep 2 ;;
+      *) echo "$H"; return 0 ;;
+    esac
+    i=$((i + 1))
+  done
+  echo "NONE"
+}
+
 echo "==== 0. 清干净，取基线 ===="
 sh /data/local/tmp/reset.sh >/dev/null 2>&1
 sh /data/local/tmp/goto.sh 运行 >/dev/null
-BASE=$(sh /data/local/tmp/ch.sh 2>/dev/null | sed 's/.*= //;s/ px//')
+BASE=$(measure_console)
 case "$BASE" in
   ''|NONE) BASE=0; echo "    警告：没量到基线（关于高度的断言都会失败）" ;;
   *)       echo "    基线控制台高度 = $BASE px（无插件、无覆盖）" ;;
@@ -97,12 +115,14 @@ fi
 echo
 echo "==== 1. 页面分成两段，默认落在「已安装」 ===="
 sh /data/local/tmp/goto.sh 插件 >/dev/null
-S=$(ui)
-has "有「已安装」段"   "已安装"
-has "有「商店」段"     "商店"
-has "空态给出了下一步" "去「商店」看看"
-has "空态有「去商店」按钮" "去商店"
-has "诊断区在（插件目录）" "插件目录"
+has "有「已安装」段"       "已安装"
+has "有「商店」段"         "商店"
+has "空态有「去商店」按钮"  "去商店"
+has "有「重新加载插件」"    "重新加载插件"
+# 日志/目录**只在看起来有问题时**才显示（正常时是一句「共加载 N 个插件」，纯噪音），
+# 所以这里反过来断言：干净状态下不该看见它们。
+hasnot "正常时不显示插件目录" "插件目录"
+hasnot "正常时不显示日志"     "共加载"
 
 echo
 echo "==== 2. 查：商店列表 ===="
@@ -137,7 +157,7 @@ fi
 V=$(prefs "$FONT")
 [ "$V" = "2" ] && ok "覆盖值写进了 Prefs（$FONT=2）" || bad "覆盖值是 [$V]，期望 2"
 sh /data/local/tmp/goto.sh 运行 >/dev/null
-H=$(sh /data/local/tmp/ch.sh 2>/dev/null | sed 's/.*= //;s/ px//')
+H=$(measure_console)
 echo "    控制台高度 = $H px（基线 $BASE）"
 if [ -n "$H" ] && [ "$H" != "NONE" ] && [ "$H" -gt "$BASE" ]; then
   ok "字号确实变大了（$BASE → $H）"
@@ -149,12 +169,13 @@ echo
 echo "==== 5. 停用：停代码，但不动用户已经调好的值 ===="
 sh /data/local/tmp/goto.sh 插件 >/dev/null
 click 停用 >/dev/null
-has "停用后不再加载它的代码" "已停用，跳过"
-has "按钮翻成了「启用」"     "启用"
-has "已加载列表变空"         "共加载 0 个插件"
-hasnot "停用后设置项消失了"   "字号倍率"
+# 注意：以前这里断言的是日志里的「已停用，跳过」「共加载 0 个插件」。
+# 日志现在只在出问题时显示，所以改成断言界面上看得见的那部分（摘要 + 按钮 + 设置项消失）。
+has "按钮翻成了「启用」"       "启用"
+has "已加载列表变空"           "没有加载任何插件"
+hasnot "停用后设置项消失了"     "字号倍率"
 sh /data/local/tmp/goto.sh 运行 >/dev/null
-H2=$(sh /data/local/tmp/ch.sh 2>/dev/null | sed 's/.*= //;s/ px//')
+H2=$(measure_console)
 [ "$H2" = "$H" ] && ok "停用后覆盖值仍然生效（$H2 px）" || bad "停用后覆盖值变了（$H → $H2）"
 
 echo
@@ -164,13 +185,13 @@ click 卸载 >/dev/null
 has "卸载前有二次确认" "确定卸载"
 click 确定 >/dev/null
 # 同理：「已卸载」在商店段。这里断言「已安装」段自己的结果。
-has "卸载后回到空态" "去「商店」看看"
+has "卸载后列表空了" "没有加载任何插件"
 su -c "test -d /data/data/$P/files/plugins/console-font" \
   && bad "插件目录还在" || ok "插件目录已删除"
 V=$(prefs "$FONT")
 [ -z "$V" ] && ok "覆盖值已清掉（不再有 $FONT）" || bad "覆盖值没清：$FONT=[$V]"
 sh /data/local/tmp/goto.sh 运行 >/dev/null
-H3=$(sh /data/local/tmp/ch.sh 2>/dev/null | sed 's/.*= //;s/ px//')
+H3=$(measure_console)
 [ "$H3" = "$BASE" ] && ok "字号回到内置值（$BASE px）" || bad "字号没还原（基线 $BASE，现在 $H3）"
 
 echo

@@ -1,7 +1,7 @@
 {
   "id": "console-font",
   "name": "控制台字号",
-  "version": "1.0",
+  "version": "1.1",
   "description": "调整运行页控制台里日志文字的大小（0.5~3 倍）。",
   "entry": "com.pumpkin.plugin.consolefont.ConsoleFontPlugin",
   "dex": "plugin-console-font.dex"

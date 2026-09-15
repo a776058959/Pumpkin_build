@@ -41,7 +41,7 @@
   真机像素验证：卡片底色与主按钮强调色**精确匹配**，浅色方案会把状态栏图标翻成深色。
 - **沉浸式已修**：状态栏与手势条那一条铺的是 App 自己的渐变，不再是系统色带。
   根因是给 `android.R.id.content` 加了 `setPadding`，露出窗口底色 `#303030`。
-  现在 insets 由 Compose 算，详见 [ANDROID.md](../../ANDROID.md) 的「沉浸式界面」。
+  现在 insets 由 Compose 算。
 - **App 自更新打通**（历史上从未成功过）：三个叠加缺陷 ——
   `build-android-apk` 的 Gradle/JDK 与工程脱节（还被 `continue-on-error` 掩盖）、
   只查 `/releases/latest`（那里常常没有 APK）、versionCode 写死。
@@ -136,8 +136,8 @@ minSdk 24 安全；CI 编译一次通过。
    这**不是代码问题**：`su` 本身可用（`su -c id` → `uid=0 context=u:r:magisk:s0`），
    但 Magisk 的超级用户列表里没有 `com.pumpkin.server`，需要人在 Magisk 里点一次授权。
    在此之前普通模式（targetSdk 28 豁免）已验证可用。
-3. **Release 资产名 `pumpkin-shell.apk` 刻意没改名**：它是文档里写明的永久下载链接的一部分，
-   改名会让老链接 404。代码不依赖这个名字（`fetchAppAsset` 按 `.apk` 扩展名匹配）。
+3. **Release 资产名 `pumpkin-shell.apk` 刻意没改名**：改名会让已发布出去的下载链接 404。
+   代码不依赖这个名字（`fetchAppAsset` 按 `.apk` 扩展名匹配）。
 4. **`Prefs.NAME = "pumpkin_shell"` 刻意没改名**：那是 SharedPreferences 的文件名，
    改了会让升级后的用户丢掉全部设置（镜像源、启动方式都在里面）。
 5. 设置页最后一条加速源要滚动才看得到（纯观感，不影响功能）。

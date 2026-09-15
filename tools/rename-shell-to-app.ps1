@@ -1,4 +1,4 @@
-﻿# 把「壳 / shell」这套叫法统一改成 App 的名字「南瓜坞」。
+# 把「壳 / shell」这套叫法统一改成 App 的名字「南瓜坞」。
 #
 # 分两类处理：
 #   1) 标识符（shellVersion / ShellAsset / SHELL_UPDATE …）—— 纯内部，零风险
@@ -7,7 +7,7 @@
 #
 # 刻意不动的东西（改了会破坏既有契约）：
 #   - Prefs.NAME = "pumpkin_shell"   ← SharedPreferences 文件名，改了用户设置全丢
-#   - pumpkin-shell.apk              ← Release 资产名，ANDROID.md 里当永久链接用
+#   - pumpkin-shell.apk              ← Release 资产名，App 自更新按它找附件
 
 $ErrorActionPreference = 'Stop'
 $root = 'D:\Pumpkin_build'

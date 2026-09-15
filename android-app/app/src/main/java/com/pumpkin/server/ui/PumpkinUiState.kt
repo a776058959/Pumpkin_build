@@ -77,7 +77,7 @@ class PumpkinUiState {
     var downloadProgressVisible by mutableStateOf(false)
 
     /** 下载区提示文字（原 downloadHint）。 */
-    var downloadHint by mutableStateOf("点「下载」开始。下载中按钮会变成「暂停」，暂停后才能删除下载任务。")
+    var downloadHint by mutableStateOf("")
 
     /** 主下载按钮文案：下载 / 暂停 / 继续（原三态按钮）。 */
     var installButtonText by mutableStateOf("下载")
@@ -185,6 +185,14 @@ class PumpkinUiState {
      * 与 [paletteId] 是**两条独立的轴** —— 色相和明暗可以自由组合。
      */
     var themeMode by mutableStateOf(PumpkinPalettes.MODE_DARK)
+
+    /**
+     * 设置页当前在哪一层（见 pages/SettingsPanes）。
+     *
+     * 0 = 主列表，其余是二级页。**不落盘**：它只是「刚才进到哪一层」这种位置，
+     * 不是偏好设置；而且切到别的页再回来时应该回到主列表，落盘反而别扭。
+     */
+    var settingsPane by mutableIntStateOf(0)
 
     /** 南瓜坞版本号（关于页用）。 */
     var appVersion by mutableStateOf("")

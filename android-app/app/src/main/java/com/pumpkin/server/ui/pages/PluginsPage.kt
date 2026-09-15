@@ -144,13 +144,7 @@ private fun InstalledSection(
             )
 
             if (state.installedPlugins.isEmpty()) {
-                // 空态要给下一步，不能只留一句「没有」。
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "去「商店」看看有什么可以装的 —— 装插件不需要 root。",
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = PumpkinColors.TextDim,
-                )
+                // 空态给下一步就够了，不解释「装插件不需要 root」那种事（那属于 README）。
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
                     onClick = { actions.setPluginTabFromUi(PluginTabs.STORE) },
@@ -165,32 +159,35 @@ private fun InstalledSection(
             }
 
             // ---- 诊断：出问题时才看，所以放在最下面 ----
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                text = "插件目录：" + state.pluginDir,
-                style = MiuixTheme.textStyles.footnote1,
-                color = PumpkinColors.TextDim,
-            )
-            if (state.pluginLog.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
+            //
+            // 日志**只在看起来有问题时**才露面。正常时它就是一句「共加载 N 个插件」，
+            // 常驻在页面上纯属噪音；而插件加载失败时它是唯一的线索，那时必须显眼。
+            val looksBroken = state.pluginLog.contains("失败") || state.pluginLog.contains("错误")
+            if (looksBroken) {
+                Spacer(modifier = Modifier.height(14.dp))
                 Text(
-                    text = "日志",
+                    text = "有问题时看这里",
                     style = MiuixTheme.textStyles.footnote1,
                     color = PumpkinColors.TextDim,
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                // 日志是排查「插件为什么没生效」的唯一入口（加载失败的原因就写在里面），
-                // 所以给它一个可读的底色块，而不是和说明文字混在一起。
                 Text(
                     text = state.pluginLog.trim(),
                     style = MiuixTheme.textStyles.footnote1,
                     color = if (LocalPumpkinDark.current) Color(0xFFCFD6E4) else Color(0xFF2A3140),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 2.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = state.pluginDir,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = PumpkinColors.TextDim,
                 )
             }
-            Spacer(modifier = Modifier.height(10.dp))
+
+            // 手放进去的插件改完要能重新扫一遍，所以这个按钮常驻。
+            // （正常装插件不用它：安装/卸载/启停都会自动重扫。）
+            Spacer(modifier = Modifier.height(14.dp))
             Button(
                 onClick = { actions.reloadPluginsFromUi() },
                 modifier = Modifier.fillMaxWidth(),
