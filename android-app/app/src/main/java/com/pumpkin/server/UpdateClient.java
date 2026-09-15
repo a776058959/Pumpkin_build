@@ -380,6 +380,133 @@ public final class UpdateClient {
         return new File(ServerPaths.downloadCacheDir(ctx), name + ".part");
     }
 
+    // ---------------------------------------------------------------- App 自身的更新包
+
+    /**
+     * App 更新包的落盘位置。
+     *
+     * 放外部私有目录（Android/data/&lt;包名&gt;/files/update/）：体积十几 MB，不占内部空间，
+     * 而且用户可以在文件管理器里看到它、出问题时手动装。取不到外部目录就退回内部目录 ——
+     * 不能因为存储位置拿不到就让更新功能失效。
+     */
+    public File appApkFile() {
+        File dir = ctx.getExternalFilesDir(null);
+        if (dir == null) {
+            dir = ctx.getFilesDir();
+        }
+        File updateDir = new File(dir, "update");
+        if (!updateDir.exists() && !updateDir.mkdirs() && !updateDir.exists()) {
+            // 真的建不出来就退回内部目录再试一次
+            updateDir = new File(ctx.getFilesDir(), "update");
+            if (!updateDir.exists()) {
+                updateDir.mkdirs();
+            }
+        }
+        return new File(updateDir, "pumpkin-app.apk");
+    }
+
+    /**
+     * 下载 App 自身的更新包。
+     *
+     * 走与服务端下载同一套多源回退（上次成功的源 → 用户镜像 → 内置镜像 → 直连）：
+     * GitHub 直连在国内经常不通，只试一次就报失败等于把功能废掉。
+     *
+     * 不做断点续传：包只有十几 MB，换源重下比维护 Range 状态简单，也不容易出错。
+     */
+    public File downloadAppApk(String url, Progress progress) throws IOException {
+        if (url == null || url.trim().isEmpty()) {
+            throw new IOException("没有可下载的地址");
+        }
+        String raw = url.trim();
+
+        LinkedHashSet<String> prefixes = new LinkedHashSet<>();
+        String remembered = Prefs.get(ctx, "good_prefix", "");
+        if (remembered != null && !remembered.isEmpty()) {
+            prefixes.add(remembered);
+        }
+        String userMirror = Prefs.get(ctx, "download_mirror", "");
+        if (userMirror != null && !userMirror.trim().isEmpty()) {
+            prefixes.add(userMirror.trim());
+        }
+        for (String p : builtinPrefixes()) {
+            prefixes.add(p);
+        }
+
+        IOException last = null;
+        for (String prefix : prefixes) {
+            if (progress != null && !progress.isRunning()) {
+                throw new IOException("已取消");
+            }
+            String full = prefix.isEmpty() ? raw : prefix + raw;
+            try {
+                File f = downloadFileTo(full, appApkFile(), progress);
+                Prefs.put(ctx, "good_prefix", prefix);
+                return f;
+            } catch (IOException e) {
+                last = e;
+                if (progress != null) {
+                    progress.onSourceFailed(full, e.getMessage() == null ? "失败" : e.getMessage());
+                }
+            }
+        }
+        throw (last != null) ? last : new IOException("所有下载源都失败了（可在设置里换镜像）");
+    }
+
+    /**
+     * 把一个 URL 流式写到目标文件。先写 {@code .part} 再改名，
+     * 避免中途失败留下半个包被后续逻辑当成完整的。
+     *
+     * APK 不额外做内容校验（服务端那份要验 ELF 头）：写进来的东西最终由系统安装器校验签名，
+     * 包不对它会直接拒绝安装，不需要我们再判断一次。
+     */
+    private File downloadFileTo(String url, File dest, Progress progress) throws IOException {
+        File tmp = new File(dest.getAbsolutePath() + ".part");
+        HttpURLConnection conn = openWithRange(url, 0);
+        long total = conn.getContentLength();
+
+        InputStream in = conn.getInputStream();
+        OutputStream out = new FileOutputStream(tmp, false);
+        long done = 0;
+        try {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+                done += n;
+                if (progress != null) {
+                    progress.onProgress(done, total);
+                    if (!progress.isRunning()) {
+                        throw new IOException("已取消");
+                    }
+                }
+            }
+            out.flush();
+        } finally {
+            try {
+                in.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                out.close();
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (tmp.length() <= 0) {
+            tmp.delete();
+            throw new IOException("下载内容为空");
+        }
+        if (dest.exists() && !dest.delete()) {
+            tmp.delete();
+            throw new IOException("无法覆盖旧的安装包");
+        }
+        if (!tmp.renameTo(dest)) {
+            tmp.delete();
+            throw new IOException("无法写入安装包");
+        }
+        return dest;
+    }
+
     private String httpGet(String url) throws IOException {
         HttpURLConnection conn = openWithRange(url, 0);
         InputStream in = conn.getInputStream();

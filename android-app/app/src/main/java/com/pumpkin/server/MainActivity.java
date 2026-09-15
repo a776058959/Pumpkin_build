@@ -70,8 +70,15 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     /** confirm() 要执行的动作，点「确定」时跑。 */
     private Runnable pendingConfirm;
 
-    /** 应用更新对话框里要下载的地址，点「下载」时打开。 */
+    /** 应用更新对话框里要下载的地址，点「下载」时在应用内下载。 */
     private String pendingAppUrl;
+
+    /**
+     * 是否正在下载 App 更新包。
+     *
+     * 同时充当 UpdateClient.Progress.isRunning() 的返回值 —— 下载线程靠它判断要不要中止。
+     */
+    private volatile boolean appUpdateBusy;
 
     private final Runnable ticker = new Runnable() {
         @Override
@@ -479,9 +486,12 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 stopThenDownload();
                 break;
             case PumpkinDialogs.APP_UPDATE:
+                // 以前这里只是 openUrl()：跳到浏览器，下完还得用户自己去文件管理器点开安装。
+                // 现在在应用内下载，下完直接交系统安装器。
                 if (pendingAppUrl != null) {
-                    openUrl(pendingAppUrl);
+                    String url = pendingAppUrl;
                     pendingAppUrl = null;
+                    downloadAndInstallApp(url);
                 }
                 break;
             case PumpkinDialogs.CONFIRM:
@@ -1196,6 +1206,138 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 }
             }
         }, "app-update-check").start();
+    }
+
+    // ---------------------------------------------------------------- App 自更新（应用内）
+
+    /**
+     * 在应用内下载 App 更新包，下完直接调系统安装器。
+     *
+     * 以前是 openUrl()：跳到浏览器下载，用户下完还得自己去文件管理器里点开那个 apk ——
+     * 多两步，而且浏览器下到哪、叫什么名用户并不清楚。现在进度就地显示，下完自动装。
+     *
+     * 安装这一步仍然交给系统安装器：覆盖安装必须由用户确认，应用没有静默安装的权限，
+     * 这是 Android 的设计，不是可以绕过的限制。
+     */
+    private void downloadAndInstallApp(final String url) {
+        if (appUpdateBusy) {
+            toast("正在下载更新包，请稍候");
+            return;
+        }
+        appUpdateBusy = true;
+        state.setAppUpdateVisible(true);
+        state.setAppUpdateProgress(0f);
+        state.setAppUpdateText("正在下载更新包…");
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final File apk = updates.downloadAppApk(url, new UpdateClient.Progress() {
+                        @Override
+                        public void onProgress(final long done, final long total) {
+                            final float f = total > 0 ? (done * 1f / total) : 0f;
+                            ui.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    state.setAppUpdateProgress(f);
+                                    state.setAppUpdateText(total > 0
+                                            ? "正在下载更新包 " + fmtSize(done) + " / " + fmtSize(total)
+                                            : "正在下载更新包 " + fmtSize(done));
+                                }
+                            });
+                        }
+
+                        @Override
+                        public boolean isRunning() {
+                            return appUpdateBusy;
+                        }
+
+                        @Override
+                        public void onSourceFailed(final String u, final String reason) {
+                            ui.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    state.setAppUpdateText("这个源不行，换一个重试：" + reason);
+                                }
+                            });
+                        }
+                    });
+
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            appUpdateBusy = false;
+                            state.setAppUpdateVisible(false);
+                            installApk(apk);
+                        }
+                    });
+                } catch (final Exception e) {
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            appUpdateBusy = false;
+                            state.setAppUpdateVisible(false);
+                            String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+                            toast("下载更新包失败：" + msg);
+                        }
+                    });
+                }
+            }
+        }, "app-update-download").start();
+    }
+
+    /**
+     * 把下好的 APK 交给系统安装器。
+     *
+     * 必须走 FileProvider 换成 content:// URI：targetSdk ≥ 24 起，把 file:// 形式的 URI
+     * 传给别的应用会直接抛 FileUriExposedException（应用崩，而且看起来毫无头绪）。
+     */
+    private void installApk(File apk) {
+        if (apk == null || !apk.exists() || apk.length() <= 0) {
+            toast("安装包不见了，请重新下载");
+            return;
+        }
+        // 没开「安装未知应用」时先引导去开，否则调起安装器也只是白弹一下。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !getPackageManager().canRequestPackageInstalls()) {
+            final File target = apk;
+            pendingConfirm = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        startActivity(new Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:" + getPackageName())));
+                        toast("请允许本应用安装应用，然后回到这里再点一次「检查更新」");
+                    } catch (Exception e) {
+                        toast("请到系统设置里允许本应用安装未知应用");
+                    }
+                    // 顺带把已经下好的包位置告诉用户，实在不行可以手动装
+                    toast("安装包已下载到：" + target.getAbsolutePath());
+                }
+            };
+            state.showConfirmDialog(
+                    PumpkinDialogs.CONFIRM,
+                    "需要先允许安装应用",
+                    "系统还没允许南瓜坞安装应用，所以装不了更新。"
+                            + "\n\n点「去设置」打开开关后，回来再点一次「检查更新」即可。",
+                    "去设置",
+                    "以后");
+            return;
+        }
+        try {
+            Uri uri = androidx.core.content.FileProvider.getUriForFile(
+                    this, getPackageName() + ".fileprovider", apk);
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            i.setDataAndType(uri, "application/vnd.android.package-archive");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            toast("安装包已下载，按系统提示覆盖安装");
+        } catch (Exception e) {
+            toast("无法调起安装器：" + e.getMessage()
+                    + "\n安装包在：" + apk.getAbsolutePath());
+        }
     }
 
     private void openUrl(String url) {

@@ -1,0 +1,30 @@
+feat(update): download and install app updates in-app
+
+"Update" used to mean openUrl(): kick the user out to a browser, let it download
+the APK somewhere, and leave them to find it in a file manager and tap it. Two
+steps of work the app can do itself, and the progress happened somewhere the app
+cannot see.
+
+Now the APK is downloaded inside the app, with progress shown in the About card
+where the check button lives, and handed straight to the system installer.
+
+Reuses the existing multi-source fallback (last-good -> user mirror -> built-ins
+-> direct), because GitHub direct is frequently unreachable here and a
+single-attempt download would make the feature useless for the people who need it
+most. Deliberately no resume: the package is ~14MB, and re-fetching on a new
+mirror is simpler and less error-prone than carrying Range state across sources.
+
+Installing goes through FileProvider. Since targetSdk 24, handing another app a
+file:// URI throws FileUriExposedException, so the file must be exposed as
+content:// via a provider. The provider's path list opens exactly one directory -
+the update download directory - rather than the app's private storage generally.
+
+Installation itself still ends in the system installer's confirmation: an app
+cannot silently install packages, and that is by design, not a limitation to work
+around. When "install unknown apps" has not been granted, the app now explains
+that and offers to open the right settings screen instead of firing an intent
+that quietly does nothing.
+
+The downloaded package also stays on disk so the path can be reported in the
+failure text - if the installer cannot be reached, the file is still usable by
+hand.

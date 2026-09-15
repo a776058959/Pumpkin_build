@@ -39,6 +39,7 @@ import com.pumpkin.server.ui.PumpkinUiState
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
@@ -234,6 +235,23 @@ fun SettingsPage(
                     onClick = { actions.checkAppUpdateFromUi() },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("检查更新") }
+
+                // App 更新包在应用内下载，进度就地显示 —— 这里不跳浏览器，
+                // 所以必须有进度反馈，否则点完「下载」之后界面毫无反应。
+                if (state.appUpdateVisible) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = state.appUpdateText,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = PumpkinColors.TextDim,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        progress = state.appUpdateProgress,
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button(

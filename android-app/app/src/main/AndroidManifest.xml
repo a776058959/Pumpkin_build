@@ -15,12 +15,29 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- App 自更新：下完 APK 要在应用内调起系统安装器。
+         没有这条权限，Intent.ACTION_VIEW 送 application/vnd.android.package-archive
+         会被系统直接拒绝。装的时候仍然由系统弹确认框（应用无权静默安装）。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:label="南瓜坞"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
+
+        <!-- 把下载好的 APK 交给系统安装器读。
+             必须用 FileProvider：targetSdk ≥ 24 起，把 file:// 形式的 URI 传给别的应用
+             会抛 FileUriExposedException，应用直接崩。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <activity
             android:name=".MainActivity"

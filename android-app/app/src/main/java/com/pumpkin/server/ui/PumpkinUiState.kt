@@ -83,6 +83,18 @@ class PumpkinUiState {
     var installButtonText by mutableStateOf("下载")
     var installButtonEnabled by mutableStateOf(false)
 
+    // ---------------------------------------------------------------- App 自更新的下载
+
+    /**
+     * App 更新包的下载状态。
+     *
+     * 刻意与服务端下载那套字段分开：两者可能同时存在（一边下服务端、一边下 App），
+     * 共用一套进度会让界面互相覆盖。
+     */
+    var appUpdateVisible by mutableStateOf(false)
+    var appUpdateProgress by mutableFloatStateOf(0f)
+    var appUpdateText by mutableStateOf("")
+
     /** 删除下载任务按钮可用性。 */
     var deleteTaskEnabled by mutableStateOf(false)
 

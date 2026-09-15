@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 能对外暴露的路径白名单。
+
+  只开放 App 更新包的下载目录（update/），别的什么都不给 ——
+  FileProvider 一旦开得太宽，等于把应用私有目录给了任何拿到 URI 的应用。
+
+  两条路径对应 UpdateClient.appApkFile() 的两个落点：
+  优先外部私有目录，拿不到时退回内部私有目录。
+-->
+<paths>
+    <external-files-path
+        name="update_external"
+        path="update/" />
+    <files-path
+        name="update_internal"
+        path="update/" />
+</paths>
