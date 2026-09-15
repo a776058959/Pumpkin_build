@@ -12,8 +12,6 @@
 
 package com.pumpkin.server.ui
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -22,13 +20,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.graphicsLayer
 import com.pumpkin.server.ui.pages.RunPage
 import com.pumpkin.server.ui.pages.SettingsPage
 import com.pumpkin.server.ui.pages.UpdatePage
@@ -98,24 +93,23 @@ fun PumpkinApp(
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.statusBars),
                 ) {
-                    // 三个页面**常驻组合**，切页只换可见性（外加一次交叉淡入）。
+                    // 只组合当前页。
                     //
-                    // 以前是 when (state.page) 只组合当前页：每次切页都要从零组合一整页
-                    //（卡片、输入框、可滚动列…），那一下在 UI 线程上要几十毫秒。
-                    // 来回快点三个按钮时每点一次就重建一页 —— gfxinfo 实测正是
-                    //「约 15 次点击 / 17 次 Slow UI thread / 最差帧 150ms」。
-                    // 拖拽不触发切页，所以拖拽一直很顺，问题只在点击上。
+                    // 曾经改成「三页常驻组合、不可见时不绘制」来省掉切页的重新组合。
+                    // 那是个**严重错误**：drawWithContent 只管绘制，**不管触摸** ——
+                    // 三个页面铺在同一个 Box 里，最上层的设置页即使不可见也照样吃掉点击，
+                    // 于是「在运行页点控制台，设置页的配色被改了」「很多按钮功能错乱」。
                     //
-                    // 现在页面第一次组合后就一直活着，切页几乎不花组合开销，只花一点绘制
-                    //（交叉淡入）—— 而 GPU 实测余量很大（99th 仅 12ms），正是该把活挪过去的地方。
-                    PageSlot(visible = state.page == 0) {
-                        RunPage(state = state, actions = actions)
-                    }
-                    PageSlot(visible = state.page == 1) {
-                        UpdatePage(state = state, actions = actions)
-                    }
-                    PageSlot(visible = state.page == 2) {
-                        SettingsPage(state = state, actions = actions)
+                    // 真机实验坐实了这一点：在运行页点 (807,1431)（该处运行页无可点控件），
+                    // palette 从 cyan 变成 green。
+                    //
+                    // 性能的账其实在别处结了：真正的瓶颈是发 debug 包（ART 不做 AOT）和没开 R8。
+                    // 那两条修完之后，切页重新组合的开销完全可以接受，不需要这种危险优化。
+                    // 相关脚本：tools/test-hidden-page-hit.sh
+                    when (state.page) {
+                        0 -> RunPage(state = state, actions = actions)
+                        1 -> UpdatePage(state = state, actions = actions)
+                        else -> SettingsPage(state = state, actions = actions)
                     }
                 }
             }
@@ -150,42 +144,5 @@ fun PumpkinApp(
             // 不受这里层级影响，这样放只是让「同一棵 Compose 树里只有一个对话框宿主」这件事直观。
             PumpkinDialogHost(state = state, actions = actions)
         }
-    }
-}
-
-/**
- * 一页内容：**常驻组合**，只按可见性切换绘制，并做一次交叉淡入。
- *
- * 为什么要这么绕，而不是直接 `when (page)`：
- * 直接判断页面只有在切页时才组合目标页，而组合一整页（卡片 / 输入框 / 可滚动列）
- * 在 UI 线程上要几十毫秒 —— 手快连点底栏时每点一次就重建一页，掉帧就是这么来的。
- * 常驻组合把这笔开销挪到首次进入，之后切页只剩绘制，而绘制侧（GPU）实测余量很大。
- *
- * 不可见时用 `drawWithContent` 直接不画，而不是 `alpha = 0f`：
- * 后者仍会走完整的绘制流程，白花钱。
- */
-@Composable
-private fun PageSlot(
-    visible: Boolean,
-    content: @Composable () -> Unit,
-) {
-    // 180ms 与底栏胶囊的行程量级对齐，避免内容先到位、胶囊还在滑的割裂感。
-    val alpha by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(durationMillis = 180),
-        label = "pageAlpha",
-    )
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .graphicsLayer { this.alpha = alpha }
-            .drawWithContent {
-                // 完全透明就不画 —— 这三个页面始终在组合树里，能省一笔是一笔。
-                if (alpha > 0.01f) {
-                    drawContent()
-                }
-            },
-    ) {
-        content()
     }
 }
