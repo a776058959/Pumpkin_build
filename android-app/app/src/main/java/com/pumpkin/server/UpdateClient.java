@@ -14,12 +14,15 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * GitHub Releases 客户端：列出可用服务端版本、下载原生二进制、查询壳自身的更新。
@@ -62,9 +65,48 @@ public final class UpdateClient {
     /** 壳（APK）自身的发布信息。 */
     public static final class ShellAsset {
         public String name = "";
+        /** 所在 release 的 tag，如 Custom-20260915-0244。 */
+        public String tag = "";
         public String downloadUrl;
         public long size;
         public long updatedAt;
+        /**
+         * 从 tag 里解析出的版本序号（Custom-YYYYMMDD-HHMM → 可比较的 long），
+         * 解析不出来时为 0。仅用于「哪个更新」的判断，不参与安装校验。
+         */
+        public long versionCode;
+    }
+
+    /**
+     * 把构建 tag 解析成可比较的版本序号。
+     *
+     * 公式与构建脚本（android-app/app/build.gradle.kts）**必须保持一致**：
+     *     versionCode = 自 1970-01-01 起的天数 * 10000 + HHMM
+     * 例：Custom-20260915-0244 → epochDay(2026-09-15) * 10000 + 0244。
+     *
+     * 为什么不用 YYYYMMDDHHMM 直接当 versionCode：那个数（约 2026 亿）超出
+     * Android versionCode 的 int 上限（21.47 亿）。用天数换算后约 2 亿，长期够用。
+     *
+     * 解析不出来时返回 0，调用方会退回按时间戳判断。
+     */
+    static long parseVersionCodeFromTag(String tag) {
+        if (tag == null) {
+            return 0;
+        }
+        Matcher m = Pattern.compile("(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})").matcher(tag);
+        if (!m.find()) {
+            return 0;
+        }
+        try {
+            int y = Integer.parseInt(m.group(1));
+            int mo = Integer.parseInt(m.group(2));
+            int d = Integer.parseInt(m.group(3));
+            int hhmm = Integer.parseInt(m.group(4) + m.group(5));
+            long epochDay = LocalDate.of(y, mo, d).toEpochDay();
+            return epochDay * 10000L + hhmm;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     public interface Progress {
@@ -139,34 +181,73 @@ public final class UpdateClient {
     }
 
     /** 查最新 Release 里的壳 APK（用于检查壳自身有没有更新）。 */
+    /**
+     * 找「壳」自己（APK）的发布信息。
+     *
+     * 为什么不能只查 /releases/latest：
+     *   本仓库的 Release 是「上游服务端构建」和「壳 APK」共用一个发布流的，
+     *   而 latest 只会返回**最新那一个** release —— 它经常只带服务端二进制、不带 APK
+     *   （服务端构建比壳频繁得多）。早先只查 latest 的写法在那种情况下直接返回 null，
+     *   用户侧表现为「没有找到壳的发布信息」，于是永远检查不到壳的更新。
+     *
+     * 现在改为：拉最近若干个 release，取其中**最新的、确实带 .apk 附件**的那个。
+     */
     public ShellAsset fetchShellAsset() throws IOException {
-        String url = apiBase(ctx) + "/repos/" + repo(ctx) + "/releases/latest";
-        JSONObject rel;
+        // releases?per_page=N 已经按发布时间倒序返回，第一个带 apk 的就是我们要的。
+        String url = apiBase(ctx) + "/repos/" + repo(ctx) + "/releases?per_page=20";
+        JSONArray rels;
         try {
-            rel = new JSONObject(httpGet(url));
+            rels = new JSONArray(httpGet(url));
         } catch (JSONException e) {
             throw new IOException("解析失败: " + e.getMessage());
         }
-        JSONArray assets = rel.optJSONArray("assets");
-        if (assets == null) {
-            return null;
-        }
-        for (int i = 0; i < assets.length(); i++) {
-            JSONObject a = assets.optJSONObject(i);
-            if (a == null) {
+        ShellAsset best = null;
+        for (int i = 0; i < rels.length(); i++) {
+            JSONObject rel = rels.optJSONObject(i);
+            if (rel == null || rel.optBoolean("draft", false)) {
                 continue;
             }
-            String nm = a.optString("name", "");
-            if (nm.endsWith(".apk")) {
+            JSONArray assets = rel.optJSONArray("assets");
+            if (assets == null) {
+                continue;
+            }
+            for (int j = 0; j < assets.length(); j++) {
+                JSONObject a = assets.optJSONObject(j);
+                if (a == null) {
+                    continue;
+                }
+                String nm = a.optString("name", "");
+                if (!nm.endsWith(".apk")) {
+                    continue;
+                }
                 ShellAsset s = new ShellAsset();
                 s.name = nm;
+                s.tag = rel.optString("tag_name", "");
                 s.downloadUrl = a.optString("browser_download_url", null);
                 s.size = a.optLong("size", 0);
+                // updated_at 表示「这个 apk 附件最后一次被替换的时间」，
+                // 比 release 的 published_at 更贴近壳的真实新旧（重新上传 apk 不会改 published_at）。
                 s.updatedAt = parseIso(a.optString("updated_at", ""));
-                return s;
+                s.versionCode = parseVersionCodeFromTag(s.tag);
+                // 选「最新」的判据：优先比 tag 解析出的版本号，都是 0（老式 tag）时再比时间戳。
+                boolean better;
+                if (best == null) {
+                    better = true;
+                } else if (s.versionCode > 0 && best.versionCode > 0) {
+                    better = s.versionCode > best.versionCode;
+                } else if (s.versionCode > 0) {
+                    better = true;      // 能解析出版本号的优先于解析不出的
+                } else if (best.versionCode > 0) {
+                    better = false;
+                } else {
+                    better = s.updatedAt > best.updatedAt;
+                }
+                if (better) {
+                    best = s;
+                }
             }
         }
-        return null;
+        return best;
     }
 
     private static long parseIso(String iso) {

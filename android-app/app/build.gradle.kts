@@ -4,6 +4,44 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 版本号由构建时间戳自动推导。
+//
+// 背景（踩过的坑）：以前 versionCode/versionName 是手写的常量，长期停在 3 / "0.3.0"，
+// 结果「壳检查更新」只能拿安装时间戳去比，分不清新旧；而且新包装上去版本显示还是 0.3.0，
+// 用户根本看不出装的是哪一版。现在每次构建都带一个唯一且单调递增的版本号。
+//
+// 公式（必须与 UpdateClient.parseVersionCodeFromTag 保持一致）：
+//     versionCode = epochDay * 10000 + HHMM
+// 例：20260915-0244 → 20711 * 10000 + 244 = 207110244
+//
+// 为什么不直接用 YYYYMMDDHHMM：那是 2026 亿，超过 Android versionCode 的 int 上限（21.47 亿）。
+// 换算成天数后约 2.07 亿，一直够用到公元 2558 年。
+//
+// 时间戳来源优先级：-PbuildStamp=…（CI 传） > 环境变量 PUMPKIN_BUILD_STAMP > 当前本地时间。
+// ─────────────────────────────────────────────────────────────────────────────
+val buildStamp: String =
+    (project.findProperty("buildStamp") as String?)?.takeIf { it.isNotBlank() }
+        ?: System.getenv("PUMPKIN_BUILD_STAMP")?.takeIf { it.isNotBlank() }
+        ?: java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(java.util.Date())
+
+val computedVersionCode: Int = run {
+    val m = Regex("(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})").find(buildStamp)
+    if (m == null) {
+        // 兜底：时间戳解析不了时用一个远高于历史版本（3）的固定值，
+        // 保证仍然能覆盖安装，不至于因为 versionCode 掉回 0 而装不上。
+        20000000
+    } else {
+        val v = m.groupValues
+        val epochDay = java.time.LocalDate.of(v[1].toInt(), v[2].toInt(), v[3].toInt()).toEpochDay()
+        val hhmm = (v[4] + v[5]).toInt()
+        (epochDay * 10000L + hhmm).toInt()
+    }
+}
+
+// 人看的版本名：主版本号 + 构建时间戳，例如 0.4.0+20260915-0244
+val computedVersionName: String = "0.4.0+$buildStamp"
+
 android {
     namespace = "com.pumpkin.server"
     compileSdk = 37
@@ -19,8 +57,8 @@ android {
         // 该域允许对应用私有目录里的文件 execve；>= 29 会被 SELinux 拒绝，
         // 那样就无法运行「在线下载」的服务端二进制。
         targetSdk = 28
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = computedVersionCode
+        versionName = computedVersionName
     }
 
     packaging {

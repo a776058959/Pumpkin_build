@@ -1016,25 +1016,42 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
             public void run() {
                 try {
                     final UpdateClient.ShellAsset asset = updates.fetchShellAsset();
-                    long installed = 0;
+                    // 用 versionCode 判断新旧，而不是安装时间：
+                    // 安装时间会被「重装同一个包」刷新，根本分不出哪个更新。
+                    int installedCode;
+                    long installedTime;
                     try {
-                        installed = getPackageManager()
-                                .getPackageInfo(getPackageName(), 0).lastUpdateTime;
-                    } catch (Exception ignored) {
-                        installed = 0;
+                        android.content.pm.PackageInfo pi = getPackageManager()
+                                .getPackageInfo(getPackageName(), 0);
+                        installedCode = pi.versionCode;
+                        installedTime = pi.lastUpdateTime;
+                    } catch (Exception e) {
+                        installedCode = 0;
+                        installedTime = 0;
                     }
-                    final long installedTime = installed;
+                    final int installed = installedCode;
+                    final long installedAt = installedTime;
                     ui.post(new Runnable() {
                         @Override
                         public void run() {
                             if (asset == null || asset.downloadUrl == null) {
-                                toast("没有找到壳的发布信息");
+                                toast("服务器上还没有发布新的壳版本");
                                 return;
                             }
-                            if (asset.updatedAt > installedTime + 120000L) {
+                            // 优先按 versionCode 比；tag 解析不出序号时退回时间戳（留 2 分钟余量）。
+                            final boolean newer;
+                            if (asset.versionCode > 0 && installed > 0) {
+                                newer = asset.versionCode > installed;
+                            } else {
+                                newer = asset.updatedAt > installedAt + 120000L;
+                            }
+                            if (newer) {
                                 new AlertDialog.Builder(MainActivity.this)
                                         .setTitle("壳有新版本")
-                                        .setMessage("服务器上的壳比你当前装的更新，要下载吗？")
+                                        .setMessage("服务器上发布了新的壳："
+                                                + (asset.tag.isEmpty() ? asset.name : asset.tag)
+                                                + "\n当前已装：" + versionName()
+                                                + "\n\n要现在下载吗？下载完点开安装包覆盖安装即可。")
                                         .setPositiveButton("下载", new DialogInterface.OnClickListener() {
                                             @Override
                                             public void onClick(DialogInterface d, int w) {
@@ -1044,7 +1061,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                                         .setNegativeButton("以后", null)
                                         .show();
                             } else {
-                                toast("壳已是最新");
+                                toast("壳已是最新（" + versionName() + "）");
                             }
                         }
                     });
