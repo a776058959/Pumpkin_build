@@ -38,7 +38,8 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     private static final int REQ_NOTIFICATIONS = 1;
     private static final int PAGE_RUN = 0;
     private static final int PAGE_UPDATE = 1;
-    private static final int PAGE_SETTINGS = 2;
+    private static final int PAGE_PLUGINS = 2;
+    private static final int PAGE_SETTINGS = 3;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -121,17 +122,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         // 插件：加载 dex，并把插件声明的设置项灌进 state。
         // 加载是逐个 try/catch 的（见 PluginManager），坏插件只影响它自己。
         plugins = new com.pumpkin.server.plugin.PluginManager(this);
-        plugins.setLanProbe(new com.pumpkin.server.plugin.PluginManager.LanProbe() {
-            @Override
-            public String host() {
-                return PumpkinServer.findLanIpv4();
-            }
-
-            @Override
-            public int port() {
-                return 25565;
-            }
-        });
+        plugins.setUpdates(updates);
         reloadPlugins();
         // 界面交给 Compose：三页 + 液态玻璃底栏都在 ui 包里。
         // setContent 必须由 Kotlin 侧调用（@Composable lambda 带 $composer 参数，Java 造不出来）。
@@ -357,27 +348,27 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         }
 
         String lan = PumpkinServer.findLanIpv4();
-        // 插件可以覆盖「对外告知的联机地址」（见 PluginKeys）。
-        // 注意它改的是**你告诉玩家的地址**，不是手机真实的网卡地址 ——
-        // 后者由路由器 DHCP / 系统 WiFi 静态设置决定，应用无权修改。
-        // 服务器监听全部网卡，所以决定玩家能否连上的就是这个地址；
-        // 「复制地址」复制的也是它，因此覆盖会一路生效到剪贴板。
-        String ovHost = plugins == null
-                ? null : plugins.override(com.pumpkin.plugin.PluginKeys.LAN_HOST);
-        String ovPort = plugins == null
-                ? null : plugins.override(com.pumpkin.plugin.PluginKeys.LAN_PORT);
-        String shownHost = (ovHost != null) ? ovHost : lan;
-        int javaPort = 25565;
-        if (ovPort != null) {
-            try {
-                javaPort = Integer.parseInt(ovPort.trim());
-            } catch (Exception ignored) {
-                // 插件填了非数字就退回默认端口，不要因为这行地址整段消失
+        s.setAddrText(lan == null
+                ? "未检测到局域网 IP（确认已连上 WiFi）"
+                : "Java " + lan + ":25565　·　基岩 " + lan + ":19132");
+
+        // 插件覆盖：控制台字号（见 PluginKeys.CONSOLE_FONT_SCALE）。
+        // 插件不直接改 App 状态，只写覆盖板；这里把覆盖值翻译成 state 里的数字。
+        float fontScale = 1f;
+        if (plugins != null) {
+            String ov = plugins.override(com.pumpkin.plugin.PluginKeys.CONSOLE_FONT_SCALE);
+            if (ov != null) {
+                try {
+                    fontScale = Float.parseFloat(ov.trim());
+                    if (fontScale < 0.5f || fontScale > 3f) {
+                        fontScale = 1f;
+                    }
+                } catch (Exception ignored) {
+                    fontScale = 1f;
+                }
             }
         }
-        s.setAddrText(shownHost == null
-                ? "未检测到局域网 IP（确认已连上 WiFi）"
-                : "Java " + shownHost + ":" + javaPort + "　·　基岩 " + shownHost + ":19132");
+        s.setConsoleFontScale(fontScale);
         s.setDirText("数据目录 " + ServerPaths.workDir(this).getAbsolutePath());
 
         boolean rootMode = Prefs.getBool(this, "root_mode", false);
@@ -426,7 +417,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         if (index < 0 || index > PAGE_SETTINGS) {
             return;
         }
-        if (index == PAGE_SETTINGS || index == PAGE_UPDATE || index == PAGE_RUN) {
+        if (index >= PAGE_RUN && index <= PAGE_SETTINGS) {
             switchPage(index);
         }
     }
@@ -1595,6 +1586,27 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         state.setPluginDir(plugins.pluginDir().getAbsolutePath());
         state.setPluginLog(plugins.logText());
 
+        // 已安装列表按目录扫，不看加载成功与否 —— 坏插件也得能卸掉。
+        // 名字和说明只有商店索引里有，索引没拉过时先显示 id。
+        state.getInstalledPlugins().clear();
+        for (String id : plugins.installedIds()) {
+            String name = id;
+            String version = plugins.installedVersion(id);
+            String desc = "";
+            for (com.pumpkin.server.plugin.PluginManager.StoreEntry e : storeCache) {
+                if (e.id.equals(id)) {
+                    name = e.name;
+                    desc = e.description;
+                    if (version.isEmpty()) {
+                        version = e.version;
+                    }
+                    break;
+                }
+            }
+            state.getInstalledPlugins().add(new com.pumpkin.server.ui.PluginStoreItemView(
+                    id, name, version, desc, plugins.installedVersion(id), plugins.isEnabled(id)));
+        }
+
         state.getPluginSettings().clear();
         for (com.pumpkin.plugin.PluginSetting st : plugins.settings()) {
             String v = plugins.override(st.getKey());
@@ -1622,5 +1634,176 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         reloadPlugins();
         refresh();
         toast("已重新加载插件");
+    }
+
+    // ---------------------------------------------------------------- 插件商店
+
+    /**
+     * 商店索引的本地缓存。
+     *
+     * 界面上的名字/说明只在索引里，而「已安装」列表是按目录扫出来的，
+     * 所以缓存一份索引，好在两边之间把名字补上。
+     */
+    private final java.util.List<com.pumpkin.server.plugin.PluginManager.StoreEntry> storeCache =
+            new java.util.ArrayList<>();
+
+    /** 拉取插件索引。不需要 root：只是一次 HTTP GET。 */
+    public void refreshPluginStoreFromUi() {
+        if (plugins == null || state == null) {
+            return;
+        }
+        if (!state.getPluginInstalling().isEmpty()) {
+            return;
+        }
+        state.setPluginStoreStatus("正在拉取插件列表…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final java.util.List<com.pumpkin.server.plugin.PluginManager.StoreEntry> list =
+                            plugins.fetchStore();
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            storeCache.clear();
+                            storeCache.addAll(list);
+                            fillStore();
+                            refreshPluginState();
+                            state.setPluginStoreStatus(list.isEmpty()
+                                    ? "列表是空的。可能是发布里还没有插件，或者索引里没有有效条目。"
+                                    : "共 " + list.size() + " 个插件。");
+                        }
+                    });
+                } catch (final Exception e) {
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            state.setPluginStoreStatus("拉取失败：" + msg(e));
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    /** 安装或更新一个插件。全程只写 App 私有目录，不需要 root。 */
+    public void installPluginFromUi(final String id) {
+        if (plugins == null || state == null || id == null) {
+            return;
+        }
+        com.pumpkin.server.plugin.PluginManager.StoreEntry target = null;
+        for (com.pumpkin.server.plugin.PluginManager.StoreEntry e : storeCache) {
+            if (e.id.equals(id)) {
+                target = e;
+                break;
+            }
+        }
+        if (target == null) {
+            toast("列表里没有这个插件，先刷新一下");
+            return;
+        }
+        final com.pumpkin.server.plugin.PluginManager.StoreEntry entry = target;
+        state.setPluginInstalling(id);
+        state.setPluginStoreStatus("正在下载 " + entry.name + "…");
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    plugins.install(entry, new UpdateClient.Progress() {
+                        @Override
+                        public void onProgress(final long done, final long total) {
+                            ui.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    state.setPluginStoreStatus("正在下载 " + entry.name + " "
+                                            + fmtSize(done) + (total > 0 ? " / " + fmtSize(total) : ""));
+                                }
+                            });
+                        }
+
+                        @Override
+                        public boolean isRunning() {
+                            // 安装过程中 activity 没了就别再写了（插件目录是私有的，
+                            // 半截的 dex 会让插件加载失败）
+                            return !isFinishing();
+                        }
+                    });
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            state.setPluginInstalling("");
+                            state.setPluginStoreStatus(entry.name + " 已装好，已自动重新加载。");
+                            fillStore();
+                            reloadPlugins();
+                            refresh();
+                        }
+                    });
+                } catch (final Exception e) {
+                    ui.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            state.setPluginInstalling("");
+                            state.setPluginStoreStatus("安装失败：" + msg(e));
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    /** 卸载插件，连同它写过的覆盖一起清掉。 */
+    public void removePluginFromUi(final String id) {
+        if (plugins == null || state == null || id == null) {
+            return;
+        }
+        state.setPluginInstalling(id);
+        // 删目录很快，但还是放后台：卸载后要重新扫一遍插件
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                plugins.remove(id);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        state.setPluginInstalling("");
+                        state.setPluginStoreStatus("已卸载 " + id);
+                        fillStore();
+                        refreshPluginState();
+                        refresh();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 启用 / 停用插件。停用只是不加载它的代码，它写过的覆盖值仍然生效。 */
+    public void setPluginEnabledFromUi(final String id, final boolean enabled) {
+        if (plugins == null || state == null || id == null) {
+            return;
+        }
+        plugins.setEnabled(id, enabled);
+        reloadPlugins();
+        fillStore();
+        refresh();
+    }
+
+    /** 把索引缓存灌进 Compose 状态，并把已安装的版本 / 启用状态对上。 */
+    private void fillStore() {
+        if (state == null || plugins == null) {
+            return;
+        }
+        state.getPluginStore().clear();
+        for (com.pumpkin.server.plugin.PluginManager.StoreEntry e : storeCache) {
+            state.getPluginStore().add(new com.pumpkin.server.ui.PluginStoreItemView(
+                    e.id, e.name, e.version, e.description,
+                    plugins.installedVersion(e.id), plugins.isEnabled(e.id)));
+        }
+    }
+
+    /** 异常转成人能读的一句话。 */
+    private static String msg(Exception e) {
+        String m = e.getMessage();
+        return (m == null || m.isEmpty()) ? e.getClass().getSimpleName() : m;
     }
 }

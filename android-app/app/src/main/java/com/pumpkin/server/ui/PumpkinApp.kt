@@ -1,11 +1,11 @@
 // Copyright 2026, Pumpkin 南瓜坞 contributors
 // SPDX-License-Identifier: Apache-2.0
 //
-// 顶层 Compose 界面：一块铺满屏幕的内容背板（负责被底栏模糊采样）+ 三页内容 + 液态玻璃底栏。
+// 顶层 Compose 界面：一块铺满屏幕的内容背板（负责被底栏模糊采样）+ 四页内容 + 液态玻璃底栏。
 //
 // 层级自下而上：
 //   1. 渐变背景（Box 铺满）
-//   2. 内容层：用 layerBackdrop(contentBackdrop) 把三页画面录进背板 —— 底栏的模糊就是采这里
+//   2. 内容层：用 layerBackdrop(contentBackdrop) 把四页画面录进背板 —— 底栏的模糊就是采这里
 //   3. 底栏 LiquidGlassNavBar（悬浮在内容之上，采样 contentBackdrop）
 //
 // 只依赖 PumpkinUiState / PumpkinActions，不引用 MainActivity（原因见 PumpkinActions.kt）。
@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.layout
+import com.pumpkin.server.ui.pages.PluginsPage
 import com.pumpkin.server.ui.pages.RunPage
 import com.pumpkin.server.ui.pages.SettingsPage
 import com.pumpkin.server.ui.pages.UpdatePage
@@ -34,6 +35,7 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Download
+import top.yukonga.miuix.kmp.icon.extended.GridView
 import top.yukonga.miuix.kmp.icon.extended.Play
 import top.yukonga.miuix.kmp.icon.extended.Settings
 
@@ -94,7 +96,7 @@ fun PumpkinApp(
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.statusBars),
                 ) {
-                    // 三页常驻组合，只让当前页可交互。
+                    // 四页常驻组合，只让当前页可交互。页序 0 运行 / 1 更新 / 2 插件 / 3 设置（与 MainActivity 的 PAGE_* 对应）。
                     //
                     // 为什么不用 when 每次重新组合：切页要重建一整页（卡片/输入框/可滚动列），
                     // 实测切页时 UI 线程会掉一帧（90th 19ms → 38ms、99th 53ms → 109ms）。
@@ -110,6 +112,9 @@ fun PumpkinApp(
                         UpdatePage(state = state, actions = actions)
                     }
                     PageSlot(visible = state.page == 2) {
+                        PluginsPage(state = state, actions = actions)
+                    }
+                    PageSlot(visible = state.page == 3) {
                         SettingsPage(state = state, actions = actions)
                     }
                 }
@@ -120,6 +125,7 @@ fun PumpkinApp(
                 listOf(
                     NavigationItem("运行", MiuixIcons.Play),
                     NavigationItem("更新", MiuixIcons.Download),
+                    NavigationItem("插件", MiuixIcons.GridView),
                     NavigationItem("设置", MiuixIcons.Settings),
                 )
             }

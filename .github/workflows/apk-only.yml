@@ -78,37 +78,97 @@ jobs:
 
       # ---------------------------------------------------------------- 插件
       #
-      # 插件是纯 Kotlin 模块，产物是普通 jar，用 D8 转成 dex 由 App 运行时加载。
+      # 插件是纯 Kotlin 模块（android-app/plugins/<模块名>），产物是普通 jar，
+      # 用 D8 转成 dex，由 App 运行时用 DexClassLoader 加载。
       #
-      # 这里加了一道**必过的断言**：插件的 jar 里绝不能出现 com/pumpkin/plugin/ 的类。
+      # 新增一个插件 = 新建一个模块目录 + 写 plugin.json，这里自动就会发现它，
+      # 不需要改 workflow。每个插件模块里的 plugin.json 就是**商店索引的唯一来源**：
+      #   { id, name, version, description, entry }  →  CI 补上 dex 文件名后汇总成 plugins.json
+      # 所以「插件列表里显示的版本」和「dex 里的代码」永远来自同一次提交，
+      # 不会出现「改了代码忘了改索引」。
+      #
+      # 这里加了一道**必过的断言**：插件的 jar 里绝不能出现 plugin-api 的类。
       # 一旦出现（也就是有人把 compileOnly 改成了 implementation），
       # PumpkinPlugin 接口就会在两个类加载器里各有一份，
       # 插件的 instanceof 判断会静默失败 —— 那种问题极难排查，所以宁可在这里构建失败。
-      - name: Build plugin and convert to dex
+      - name: Build plugins and convert to dex
         working-directory: android-app
         run: |
-          gradle :plugins:lan-address:jar --no-daemon --stacktrace
-          JAR=$(ls plugins/lan-address/build/libs/*.jar | grep -v sources | head -1)
-          echo "plugin jar: $JAR"
-          # 注意要精确匹配 API 的类名：插件自己的包是 com.pumpkin.plugin.lanaddress，
-          # 它会天然命中 'com/pumpkin/plugin/' 这个前缀（本喵第一版就因此误报过）。
-          if unzip -l "$JAR" | grep -qE 'com/pumpkin/plugin/(PumpkinPlugin|PluginHost|PluginSetting|PluginKeys)'; then
-            echo "::error::插件 jar 里混进了 plugin-api 的类（PumpkinPlugin/PluginHost）。"
-            echo "::error::这些类只能由 App 提供，插件必须用 compileOnly 依赖，否则插件的 instanceof 会静默失败。"
-            exit 1
-          fi
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           echo "d8: $BT/d8"
           mkdir -p plugin-out
-          "$BT/d8" --min-api 26 --output plugin-out "$JAR"
-          cp plugin-out/classes.dex plugin-out/plugin.dex
+          : > plugin-out/index.tsv
+
+          for dir in plugins/*/; do
+            name=$(basename "$dir")
+            [ -f "$dir/build.gradle.kts" ] || continue
+            echo "==== 构建插件 $name ===="
+
+            gradle ":plugins:$name:jar" --no-daemon --stacktrace
+
+            JAR=$(ls "plugins/$name"/build/libs/*.jar | grep -v sources | head -1)
+            echo "plugin jar: $JAR"
+
+            # 精确匹配 API 的类名：插件自己的包是 com.pumpkin.plugin.<x>，
+            # 它会天然命中 'com/pumpkin/plugin/' 这个前缀（第一版就因此误报过）。
+            if unzip -l "$JAR" | grep -qE 'com/pumpkin/plugin/(PumpkinPlugin|PluginHost|PluginSetting|PluginKeys)'; then
+              echo "::error::插件 $name 的 jar 里混进了 plugin-api 的类（PumpkinPlugin/PluginHost）。"
+              echo "::error::这些类只能由 App 提供，插件必须用 compileOnly 依赖，否则插件的 instanceof 会静默失败。"
+              exit 1
+            fi
+
+            rm -rf plugin-tmp && mkdir -p plugin-tmp
+            "$BT/d8" --min-api 26 --output plugin-tmp "$JAR"
+            cp plugin-tmp/classes.dex "plugin-out/plugin-$name.dex"
+
+            # 索引里记一行：模块名 + plugin.json
+            printf '%s\t%s\n' "$name" "$dir/plugin.json" >> plugin-out/index.tsv
+          done
+
           ls -lh plugin-out
+
+      # 汇总成商店索引。dex 文件名由 CI 按模块名派生（plugin-<模块名>.dex），
+      # 不让 plugin.json 自己写 —— 否则改个模块名就会出现「索引指向一个不存在的附件」。
+      - name: Build plugin store index
+        working-directory: android-app
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+
+          out = []
+          for line in pathlib.Path("plugin-out/index.tsv").read_text().splitlines():
+              if not line.strip():
+                  continue
+              module, manifest = line.split("\t")
+              meta = json.loads(pathlib.Path(manifest).read_text(encoding="utf-8"))
+              for field in ("id", "name", "version", "entry"):
+                  if not str(meta.get(field, "")).strip():
+                      raise SystemExit("plugin.json 缺少字段 " + field + "：" + manifest)
+              meta["dex"] = "plugin-" + module + ".dex"
+              if not (pathlib.Path("plugin-out") / meta["dex"]).exists():
+                  raise SystemExit("没有生成 " + meta["dex"])
+              out.append(meta)
+
+          ids = [m["id"] for m in out]
+          if len(ids) != len(set(ids)):
+              raise SystemExit("插件 id 重复：" + repr(ids))
+
+          index = {"version": 1, "plugins": out}
+          pathlib.Path("plugin-out/plugins.json").write_text(
+              json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(index, ensure_ascii=False, indent=2))
+          PY
 
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
-          name: pumpkin-plugin-lan-address-${{ steps.stamp.outputs.utc }}
-          path: android-app/plugin-out/plugin.dex
+          name: pumpkin-plugins-${{ steps.stamp.outputs.utc }}
+          path: android-app/plugin-out/*.dex
+      - name: Upload plugin store index
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumpkin-plugins-index-${{ steps.stamp.outputs.utc }}
+          path: android-app/plugin-out/plugins.json
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -172,3 +232,57 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "Custom Build $STAMP" \
             --notes-file notes.md
+
+  # 插件商店：把插件 dex 与索引发到一个**固定 tag** 的 Release（tag = plugins）。
+  #
+  # 为什么不跟 App 一起发：插件和 App 是两个独立的更新节奏 ——
+  # 改一个插件不该逼所有人重装 App。App 侧按 tag 取附件
+  # （见 UpdateClient.releaseAssetUrl），所以这个 Release 建一次就一直复用。
+  #
+  # 发成 prerelease：这样它不会成为仓库的「Latest release」，
+  # 因此既不影响 App 自更新找 APK，也不影响服务端版本列表。
+  plugins:
+    needs: apk
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download plugin dex files
+        uses: actions/download-artifact@v4
+        with:
+          name: pumpkin-plugins-${{ needs.apk.outputs.stamp }}
+          path: rel-plugins
+
+      - name: Download plugin store index
+        uses: actions/download-artifact@v4
+        with:
+          name: pumpkin-plugins-index-${{ needs.apk.outputs.stamp }}
+          path: rel-plugins
+
+      - name: Publish plugin store release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAMP: ${{ needs.apk.outputs.stamp }}
+        shell: bash
+        run: |
+          ls -lh rel-plugins
+          cat rel-plugins/plugins.json
+
+          # tag 固定为 plugins —— App 就是按这个 tag 取 plugins.json 的。
+          # 已存在就覆盖附件（--clobber），否则插件更新永远发不出去。
+          if gh release view plugins --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload plugins rel-plugins/*.dex rel-plugins/plugins.json \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit plugins \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "插件商店（$STAMP 更新）" \
+              --notes "插件索引与 dex。App 的「插件」页读这里的 plugins.json，不需要 root。"
+          else
+            gh release create plugins rel-plugins/*.dex rel-plugins/plugins.json \
+              --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --title "插件商店（$STAMP 更新）" \
+              --notes "插件索引与 dex。App 的「插件」页读这里的 plugins.json，不需要 root。"
+          fi

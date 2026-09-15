@@ -1,10 +1,10 @@
 # R8 规则。
 #
-# 本应用**没有反射、没有按名实例化**（已 grep 确认：无 Class.forName / getMethod /
-# newInstance / ::class.java），所以业务类不需要任何 keep 规则。
+# 业务类本身不需要 keep 规则（业务层没有反射）。
+# 真正的例外只有一处：**插件 API**（见下），它是被运行时的 DexClassLoader 按名字用的。
 # Compose / miuix / androidx 各自带 consumer 规则，构建时会自动合并进来。
 #
-# 这里只加两条为了「可调试性」的规则，不是为了让代码能跑。
+# 上面的「不需要」和下面的「必须 keep」是同一次构建里的两件事，别混起来看。
 
 # 崩溃堆栈里保留行号。本应用有崩溃处理（把堆栈写到 last_crash.txt），
 # 没有行号的堆栈基本没法定位。

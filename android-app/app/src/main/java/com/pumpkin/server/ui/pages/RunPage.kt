@@ -189,7 +189,8 @@ fun RunPage(
                     SelectionContainer {
                         Text(
                             text = display,
-                            fontSize = 10.5.sp,
+                            // 字号可由插件覆盖（「控制台字号」插件）：内置 10.5sp 在手机上偏小。
+                            fontSize = (10.5f * state.consoleFontScale).sp,
                             fontFamily = FontFamily.Monospace,
                             color = if (state.logText.isEmpty()) {
                                 PumpkinColors.TextDim

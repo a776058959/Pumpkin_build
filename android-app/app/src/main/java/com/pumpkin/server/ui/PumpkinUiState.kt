@@ -124,6 +124,21 @@ class PumpkinUiState {
     /** 插件声明的设置项，由 Java 侧填。 */
     val pluginSettings = mutableStateListOf<PluginSettingView>()
 
+    /** 控制台字号倍率，来自插件覆盖板（见 PluginKeys.CONSOLE_FONT_SCALE）。1 = 内置字号。 */
+    var consoleFontScale by mutableFloatStateOf(1f)
+
+    /** 已安装的插件（含启用状态），由 Java 侧填。 */
+    val installedPlugins = mutableStateListOf<PluginStoreItemView>()
+
+    /** 商店里的可用插件（来自插件的 plugins.json 索引）。 */
+    val pluginStore = mutableStateListOf<PluginStoreItemView>()
+
+    /** 商店状态提示：正在拉取 / 失败原因 / 共几个。 */
+    var pluginStoreStatus by mutableStateOf("")
+
+    /** 正在安装的插件 id；空串表示当前没有安装进行中。 */
+    var pluginInstalling by mutableStateOf("")
+
     /** 删除下载任务按钮可用性。 */
     var deleteTaskEnabled by mutableStateOf(false)
 
@@ -257,4 +272,20 @@ data class PluginSettingView(
     val value: String,
     val summary: String,
     val placeholder: String,
+)
+
+
+/**
+ * 插件商店里的一项。
+ *
+ * @param installedVersion 已安装的版本；空串表示没装过。
+ * @param enabled 已安装时是否启用（未安装时无意义）。
+ */
+data class PluginStoreItemView(
+    val id: String,
+    val name: String,
+    val version: String,
+    val description: String,
+    val installedVersion: String,
+    val enabled: Boolean,
 )

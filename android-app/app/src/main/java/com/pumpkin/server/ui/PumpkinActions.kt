@@ -16,7 +16,7 @@ package com.pumpkin.server.ui
 /** 界面能触发的全部动作。实现方是 MainActivity（Java）。 */
 interface PumpkinActions {
 
-    /** 底部导航切到第 index 页（0=运行 1=更新 2=设置）。 */
+    /** 底部导航切到第 index 页（0=运行 1=更新 2=插件 3=设置）。 */
     fun onNavItemSelected(index: Int)
 
     // ---------------- 运行页 ----------------
@@ -71,6 +71,18 @@ interface PumpkinActions {
 
     /** 重新扫描并加载插件目录。 */
     fun reloadPluginsFromUi()
+
+    /** 拉取插件索引（商店列表）。 */
+    fun refreshPluginStoreFromUi()
+
+    /** 安装或更新指定 id 的插件。全程只写 App 私有目录，不需要 root。 */
+    fun installPluginFromUi(id: String)
+
+    /** 卸载指定 id 的插件，并清掉它写过的覆盖。 */
+    fun removePluginFromUi(id: String)
+
+    /** 启用 / 停用指定 id 的插件。 */
+    fun setPluginEnabledFromUi(id: String, enabled: Boolean)
 
     /** 打开「App 更新下载源」选择框。 */
     fun showAppSourceDialogFromUi()

@@ -43,6 +43,100 @@ public final class UpdateClient {
      * 定义在 {@link MirrorOption} 里，与设置页的「加速源」选项共用同一份清单，
      * 避免两处各写一份、改一处漏一处（曾经就是硬编码在这里的）。
      */
+    /**
+     * 构造下载源顺序：用户为 App 更新单独选的源 → 官方直连 → 通用镜像前缀 → 内置加速源。
+     *
+     * 官方直连排在前面是有意的：App 更新包和插件都是一次性小下载，先直连最快，
+     * 连不上会自动往下换源。（历史上沿用服务端的「上次成功的源优先」，
+     * 结果从慢镜像下十几 MB 会卡很久。）
+     *
+     * App 更新与插件下载共用这一套，所以放在这里而不是各自写一遍。
+     */
+    private LinkedHashSet<String> buildPrefixes() {
+        LinkedHashSet<String> prefixes = new LinkedHashSet<>();
+        String appSource = Prefs.get(ctx, "app_update_mirror", "");
+        if (appSource != null && !appSource.trim().isEmpty()) {
+            prefixes.add(appSource.trim());
+        }
+        prefixes.add("");                                   // 官方直连
+        String userMirror = Prefs.get(ctx, "download_mirror", "");
+        if (userMirror != null && !userMirror.trim().isEmpty()) {
+            prefixes.add(userMirror.trim());
+        }
+        for (String p : builtinPrefixes()) {
+            prefixes.add(p);
+        }
+        return prefixes;
+    }
+
+    /**
+     * 把任意 URL 下到指定文件，走多源回退。
+     *
+     * 插件下载用它 —— 与 App 更新同一套源顺序，因此国内网络下也能装上插件。
+     */
+    public File downloadTo(String url, File dest, Progress progress) throws IOException {
+        if (url == null || url.trim().isEmpty()) {
+            throw new IOException("没有可下载的地址");
+        }
+        String raw = url.trim();
+        IOException last = null;
+        for (String prefix : buildPrefixes()) {
+            if (progress != null && !progress.isRunning()) {
+                throw new IOException("已取消");
+            }
+            String full = prefix.isEmpty() ? raw : prefix + raw;
+            try {
+                return downloadFileTo(full, dest, progress);
+            } catch (IOException e) {
+                last = e;
+                if (progress != null) {
+                    progress.onSourceFailed(full, e.getMessage() == null ? "失败" : e.getMessage());
+                }
+            }
+        }
+        throw (last != null) ? last : new IOException("所有下载源都失败了（可在设置里换镜像）");
+    }
+
+    /** 取一段文本（插件索引这类小 JSON），同样走多源回退。 */
+    public String fetchText(String url) throws IOException {
+        if (url == null || url.trim().isEmpty()) {
+            throw new IOException("没有地址");
+        }
+        String raw = url.trim();
+        IOException last = null;
+        for (String prefix : buildPrefixes()) {
+            String full = prefix.isEmpty() ? raw : prefix + raw;
+            try {
+                return httpGet(full);
+            } catch (IOException e) {
+                last = e;
+            }
+        }
+        throw (last != null) ? last : new IOException("取不到内容");
+    }
+
+    /**
+     * 取某个 tag 的 Release 里指定名字的附件下载地址；没有该附件就返回 null。
+     *
+     * 插件索引用固定 tag（`plugins`）发布，所以按 tag 找，而不是找「最新 Release」——
+     * 后者经常是服务端构建，没有插件附件。
+     */
+    public String releaseAssetUrl(String tag, String assetName) throws IOException {
+        String json = fetchText(apiBase(ctx) + "/repos/" + repo(ctx) + "/releases/tags/" + tag);
+        org.json.JSONObject rel = new org.json.JSONObject(json);
+        org.json.JSONArray assets = rel.optJSONArray("assets");
+        if (assets == null) {
+            return null;
+        }
+        for (int i = 0; i < assets.length(); i++) {
+            org.json.JSONObject a = assets.optJSONObject(i);
+            if (a != null && assetName.equals(a.optString("name", ""))) {
+                return a.optString("browser_download_url", null);
+            }
+        }
+        return null;
+    }
+
     private static String[] builtinPrefixes() {
         return MirrorOption.builtinPrefixes();
     }
@@ -419,24 +513,7 @@ public final class UpdateClient {
         }
         String raw = url.trim();
 
-        // 源顺序：用户为「App 更新」单独选的源 → 官方直连 → 通用镜像前缀 → 内置加速源。
-        //
-        // 官方直连排在前面是有意的。以前沿用服务端那套「上次成功的源优先」，
-        // 结果从某个慢镜像下十几 MB 的包会卡很久（实测卡在 3.3MB/13.7MB 几乎不动）。
-        // App 更新包是一次性小下载，先直连最快；连不上会自动往下换源。
-        LinkedHashSet<String> prefixes = new LinkedHashSet<>();
-        String appSource = Prefs.get(ctx, "app_update_mirror", "");
-        if (appSource != null && !appSource.trim().isEmpty()) {
-            prefixes.add(appSource.trim());
-        }
-        prefixes.add("");                                   // 官方直连
-        String userMirror = Prefs.get(ctx, "download_mirror", "");
-        if (userMirror != null && !userMirror.trim().isEmpty()) {
-            prefixes.add(userMirror.trim());
-        }
-        for (String p : builtinPrefixes()) {
-            prefixes.add(p);
-        }
+        LinkedHashSet<String> prefixes = buildPrefixes();
 
         IOException last = null;
         for (String prefix : prefixes) {

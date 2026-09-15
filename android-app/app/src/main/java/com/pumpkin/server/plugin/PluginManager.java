@@ -28,7 +28,7 @@ import dalvik.system.DexClassLoader;
  * <h3>插件长什么样</h3>
  * <pre>
  * filesDir/plugins/&lt;插件id&gt;/
- *     plugin.json     {"id":"lan-address","entry":"com.pumpkin.plugin.lanaddress.LanAddressPlugin"}
+ *     plugin.json     {"id":"console-font","entry":"com.pumpkin.plugin.consolefont.ConsoleFontPlugin"}
  *     plugin.dex      插件代码（CI 用 D8 把插件 jar 转出来的）
  * </pre>
  *
@@ -116,6 +116,12 @@ public final class PluginManager {
         int ok = 0;
         for (File sub : subs) {
             if (!sub.isDirectory()) {
+                continue;
+            }
+            if (!isEnabled(sub.getName())) {
+                // 停用的插件不进 dex、不声明设置项，但它写的覆盖值仍然生效 ——
+                // 「停用」是停代码，不是把用户已经调好的值还原。
+                log("[" + sub.getName() + "] 已停用，跳过");
                 continue;
             }
             try {
@@ -254,6 +260,10 @@ public final class PluginManager {
         @Override
         public void set(String key, String value) {
             setOverride(key, value);
+            // 记下来，卸载这个插件时才能把它写过的覆盖键一并清掉
+            if (value != null && !value.trim().isEmpty()) {
+                rememberKey(pluginId, key);
+            }
         }
 
         @Override
@@ -267,41 +277,196 @@ public final class PluginManager {
             // 但至少不会两个控件打架（只留一个）。
             settings.put(setting.getKey(), setting);
         }
-
-        @Override
-        public String detectedLanHost() {
-            return detectLanHost();
-        }
-
-        @Override
-        public int detectedLanPort() {
-            return detectLanPort();
-        }
     }
 
-    // ---------------------------------------------------------------- 环境信息
+    // ================================================================ 插件商店
     //
-    // 这两个方法刻意放在这里（而不是让插件自己判断），因为「App 认为的地址是什么」
-    // 只有 App 自己知道；插件要做的是在被给到的真实值基础上做覆盖。
+    // 插件索引发布在一个固定 tag（STORE_TAG）的 Release 里：
+    //     plugins.json      {"plugins":[{id,name,version,description,entry,dex}, ...]}
+    //     plugin-<id>.dex   各插件的代码
+    //
+    // 用固定 tag 而不是「最新 Release」：后者通常是服务端构建，没有插件附件。
+    // 下载走 UpdateClient.downloadTo（与 App 更新同一套多源回退），
+    // 所以**不需要 root、也不需要任何存储权限**：App 只是往自己的私有目录写文件。
 
-    /** 由 App 注入：返回当前自动探测到的局域网地址。 */
-    public interface LanProbe {
-        String host();
+    /** 插件索引所在的 Release tag。 */
+    public static final String STORE_TAG = "plugins";
 
-        int port();
+    private static final String STORE_INDEX = "plugins.json";
+
+    private com.pumpkin.server.UpdateClient updates;
+
+    public void setUpdates(com.pumpkin.server.UpdateClient u) {
+        this.updates = u;
     }
 
-    private LanProbe probe;
+    /** 商店里的一条插件信息。 */
+    public static final class StoreEntry {
+        public final String id;
+        public final String name;
+        public final String version;
+        public final String description;
+        public final String entry;
+        public final String dex;
 
-    public void setLanProbe(LanProbe p) {
-        this.probe = p;
+        StoreEntry(String id, String name, String version, String description,
+                String entry, String dex) {
+            this.id = id;
+            this.name = name;
+            this.version = version;
+            this.description = description;
+            this.entry = entry;
+            this.dex = dex;
+        }
     }
 
-    private String detectLanHost() {
-        return probe == null ? "" : probe.host();
+    /** 拉取插件索引。失败直接抛，由调用方把原因显示出来。 */
+    public List<StoreEntry> fetchStore() throws Exception {
+        if (updates == null) {
+            throw new IllegalStateException("没有绑定 UpdateClient");
+        }
+        String indexUrl = updates.releaseAssetUrl(STORE_TAG, STORE_INDEX);
+        if (indexUrl == null) {
+            throw new java.io.IOException("发布里没有 " + STORE_INDEX + "（tag=" + STORE_TAG + "）");
+        }
+        org.json.JSONObject root = new org.json.JSONObject(updates.fetchText(indexUrl));
+        org.json.JSONArray arr = root.optJSONArray("plugins");
+        List<StoreEntry> out = new ArrayList<>();
+        if (arr == null) {
+            return out;
+        }
+        for (int i = 0; i < arr.length(); i++) {
+            org.json.JSONObject o = arr.optJSONObject(i);
+            if (o == null) {
+                continue;
+            }
+            String id = o.optString("id", "").trim();
+            String entry = o.optString("entry", "").trim();
+            String dex = o.optString("dex", "").trim();
+            if (id.isEmpty() || entry.isEmpty() || dex.isEmpty()) {
+                continue;
+            }
+            out.add(new StoreEntry(id, o.optString("name", id), o.optString("version", ""),
+                    o.optString("description", ""), entry, dex));
+        }
+        return out;
     }
 
-    private int detectLanPort() {
-        return probe == null ? 0 : probe.port();
+    /** 已安装插件的版本（安装时记在 Prefs 里）；没装过返回空串。 */
+    public String installedVersion(String id) {
+        String v = Prefs.get(ctx, "plugin_ver_" + id, "");
+        return v == null ? "" : v;
     }
+
+    /** 插件是否启用。默认启用。 */
+    public boolean isEnabled(String id) {
+        return Prefs.getBool(ctx, "plugin_enabled_" + id, true);
+    }
+
+    public void setEnabled(String id, boolean enabled) {
+        Prefs.putBool(ctx, "plugin_enabled_" + id, enabled);
+    }
+
+    /**
+     * 下载并安装（或更新）一个插件。
+     *
+     * 全程只写 App 自己的私有目录，不需要 root，也不需要存储权限。
+     */
+    public void install(StoreEntry e, com.pumpkin.server.UpdateClient.Progress progress)
+            throws Exception {
+        if (updates == null) {
+            throw new IllegalStateException("没有绑定 UpdateClient");
+        }
+        String url = updates.releaseAssetUrl(STORE_TAG, e.dex);
+        if (url == null) {
+            throw new java.io.IOException("发布里没有 " + e.dex);
+        }
+        File dir = new File(pluginDir(), e.id);
+        if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
+            throw new java.io.IOException("建不了插件目录：" + dir.getAbsolutePath());
+        }
+        updates.downloadTo(url, new File(dir, "plugin.dex"), progress);
+        // plugin.json 由索引里的 entry 生成 —— 使用者不需要知道这个文件的存在
+        java.io.FileWriter w = new java.io.FileWriter(new File(dir, "plugin.json"), false);
+        try {
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("id", e.id);
+            o.put("entry", e.entry);
+            w.write(o.toString());
+        } finally {
+            try {
+                w.close();
+            } catch (Exception ignored) {
+            }
+        }
+        Prefs.put(ctx, "plugin_ver_" + e.id, e.version);
+        Prefs.putBool(ctx, "plugin_enabled_" + e.id, true);
+        loadAll();
+    }
+
+    /** 卸载插件：删目录 + 清掉它写过的覆盖键。 */
+    public void remove(String id) {
+        deleteRecursively(new File(pluginDir(), id));
+        String keys = Prefs.get(ctx, "plugin_keys_" + id, "");
+        if (keys != null) {
+            for (String k : keys.split(",")) {
+                String key = k.trim();
+                if (!key.isEmpty()) {
+                    setOverride(key, null);
+                }
+            }
+        }
+        Prefs.put(ctx, "plugin_keys_" + id, "");
+        Prefs.put(ctx, "plugin_ver_" + id, "");
+        loadAll();
+    }
+
+    /** 记住这个插件写过哪些覆盖键，卸载时好清干净。 */
+    private void rememberKey(String pluginId, String key) {
+        String cur = Prefs.get(ctx, "plugin_keys_" + pluginId, "");
+        if (cur == null) {
+            cur = "";
+        }
+        for (String k : cur.split(",")) {
+            if (k.trim().equals(key)) {
+                return;
+            }
+        }
+        Prefs.put(ctx, "plugin_keys_" + pluginId, cur.isEmpty() ? key : cur + "," + key);
+    }
+
+    /**
+     * 已安装的插件 id（扫目录，不看是否加载成功）。
+     *
+     * 和 {@link #loaded()} 的区别：目录里存在但被停用、或者加载失败的插件，
+     * 这里仍然列得出来 —— 否则用户没法在界面上把坏插件卸掉。
+     */
+    public List<String> installedIds() {
+        List<String> out = new ArrayList<>();
+        File[] subs = pluginDir().listFiles();
+        if (subs == null) {
+            return out;
+        }
+        for (File sub : subs) {
+            if (sub.isDirectory() && new File(sub, "plugin.json").exists()) {
+                out.add(sub.getName());
+            }
+        }
+        java.util.Collections.sort(out);
+        return out;
+    }
+
+    private static void deleteRecursively(File f) {
+        if (f == null || !f.exists()) {
+            return;
+        }
+        File[] kids = f.listFiles();
+        if (kids != null) {
+            for (File k : kids) {
+                deleteRecursively(k);
+            }
+        }
+        f.delete();
+    }
+
 }
