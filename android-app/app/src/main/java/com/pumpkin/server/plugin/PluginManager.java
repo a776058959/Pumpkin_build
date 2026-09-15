@@ -343,7 +343,31 @@ public final class PluginManager {
         if (indexUrl == null) {
             throw new java.io.IOException("发布里没有 " + STORE_INDEX + "（tag=" + STORE_TAG + "）");
         }
-        org.json.JSONObject root = new org.json.JSONObject(updates.fetchText(indexUrl));
+        String raw = updates.fetchText(indexUrl);
+        List<StoreEntry> out = parseStore(raw);
+        // 存一份到插件目录。理由见 cachedStore()：**插件名只有索引里有**，
+        // 不缓存的话，装完插件重启 App，「已安装」列表里显示的就是 id（confirm-stop）
+        // 而不是名字（停止前确认）—— 除非用户碰巧又去了一趟商店。
+        saveStoreCache(raw);
+        return out;
+    }
+
+    /** 上次拉到的索引。没有、读不动、或者格式不对都返回空列表（不抛）。 */
+    public List<StoreEntry> cachedStore() {
+        File f = storeCacheFile();
+        if (!f.isFile()) {
+            return new ArrayList<>();
+        }
+        try {
+            return parseStore(readText(f));
+        } catch (Exception e) {
+            // 缓存坏了不该影响任何事：下次刷新会重新写一份
+            return new ArrayList<>();
+        }
+    }
+
+    private List<StoreEntry> parseStore(String json) throws Exception {
+        org.json.JSONObject root = new org.json.JSONObject(json);
         org.json.JSONArray arr = root.optJSONArray("plugins");
         List<StoreEntry> out = new ArrayList<>();
         if (arr == null) {
@@ -364,6 +388,23 @@ public final class PluginManager {
                     o.optString("description", ""), entry, dex));
         }
         return out;
+    }
+
+    private File storeCacheFile() {
+        return new File(pluginDir(), "index.json");
+    }
+
+    private void saveStoreCache(String raw) {
+        try {
+            java.io.FileWriter w = new java.io.FileWriter(storeCacheFile(), false);
+            try {
+                w.write(raw);
+            } finally {
+                w.close();
+            }
+        } catch (Exception ignored) {
+            // 缓存写不进去只是下次要从网上再拉一遍，不影响装插件
+        }
     }
 
     /** 已安装插件的版本（安装时记在 Prefs 里）；没装过返回空串。 */

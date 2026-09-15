@@ -1607,17 +1607,44 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         state.setPluginDir(plugins.pluginDir().getAbsolutePath());
         state.setPluginLog(plugins.logText());
 
+        // 先用上次拉到的索引打底。**插件名只有索引里有**，不这么做的话，
+        // 装完插件重启 App，「已安装」列表显示的就是 id（confirm-stop）
+        // 而不是名字（停止前确认）—— 除非用户碰巧又去了一趟商店。
+        if (storeCache.isEmpty()) {
+            java.util.List<com.pumpkin.server.plugin.PluginManager.StoreEntry> cached =
+                    plugins.cachedStore();
+            if (!cached.isEmpty()) {
+                storeCache.addAll(cached);
+                fillStore();
+                state.setPluginStoreStatus("上次拉取的列表（点「刷新」更新）。");
+            }
+        }
+
         // 已安装列表按目录扫，不看加载成功与否 —— 坏插件也得能卸掉。
-        // 名字和说明只有商店索引里有，索引没拉过时先显示 id。
+        // 名字来源按可靠性排序：插件自己报的 > 索引里的 > id。
         state.getInstalledPlugins().clear();
         for (String id : plugins.installedIds()) {
             String name = id;
             String version = plugins.installedVersion(id);
             String desc = "";
+            for (com.pumpkin.server.plugin.PluginManager.LoadedPlugin lp : list) {
+                // 插件已经在跑，它自己报的名字一定最准（也比索引新）
+                if (lp.id.equals(id)) {
+                    name = lp.name;
+                    if (desc.isEmpty()) {
+                        desc = lp.description;
+                    }
+                    break;
+                }
+            }
             for (com.pumpkin.server.plugin.PluginManager.StoreEntry e : storeCache) {
                 if (e.id.equals(id)) {
-                    name = e.name;
-                    desc = e.description;
+                    if (name.equals(id)) {
+                        name = e.name;
+                    }
+                    if (desc.isEmpty()) {
+                        desc = e.description;
+                    }
                     if (version.isEmpty()) {
                         version = e.version;
                     }
