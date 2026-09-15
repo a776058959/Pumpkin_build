@@ -133,6 +133,10 @@ kotlin {
 }
 
 dependencies {
+    // 插件 API。插件用 compileOnly 依赖它，运行时接口类由 App 提供（父类加载器），
+    // 所以 App 这一侧必须真的把它打进 dex。
+    implementation(project(":plugin-api"))
+
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
 

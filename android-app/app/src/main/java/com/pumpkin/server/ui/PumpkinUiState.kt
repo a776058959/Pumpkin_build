@@ -105,6 +105,25 @@ class PumpkinUiState {
     /** App 更新包的下载源显示名，例如「官方直连」或某个加速源。 */
     var appUpdateSourceLabel by mutableStateOf("")
 
+    // ---------------------------------------------------------------- 插件
+
+    /**
+     * 已加载插件的摘要，例如「已加载 1 个：局域网地址」。
+     *
+     * 插件是运行时用 DexClassLoader 加载的（见 PluginManager），
+     * 加载失败只体现在这段文字与 [pluginLog] 里，不会让 App 崩。
+     */
+    var pluginSummary by mutableStateOf("")
+
+    /** 插件目录路径，显示出来让使用者知道往哪放插件。 */
+    var pluginDir by mutableStateOf("")
+
+    /** 插件日志（插件通过 PluginHost.log 写的）。 */
+    var pluginLog by mutableStateOf("")
+
+    /** 插件声明的设置项，由 Java 侧填。 */
+    val pluginSettings = mutableStateListOf<PluginSettingView>()
+
     /** 删除下载任务按钮可用性。 */
     var deleteTaskEnabled by mutableStateOf(false)
 
@@ -222,3 +241,20 @@ class PumpkinUiState {
         "page=$page running=$running logLen=${logText.length} " +
             "ver=$versionCurrent installed=${installedTags.size} available=${availableTags.size}"
 }
+
+/**
+ * 设置页里渲染的一个插件设置项。
+ *
+ * 插件只**声明**（标题、形态、默认值、说明），控件由 App 渲染 ——
+ * 这样插件不必依赖 Compose，编译产物就是一个很小的纯 Kotlin dex。
+ *
+ * @param isToggle true 表示开关（值为 "true"/"false"），false 表示单行文本。
+ */
+data class PluginSettingView(
+    val key: String,
+    val title: String,
+    val isToggle: Boolean,
+    val value: String,
+    val summary: String,
+    val placeholder: String,
+)

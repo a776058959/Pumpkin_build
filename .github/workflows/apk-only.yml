@@ -76,6 +76,37 @@ jobs:
              "apk-out/pumpkin-app-${{ steps.stamp.outputs.utc }}.apk"
           ls -lh apk-out
 
+      # ---------------------------------------------------------------- 插件
+      #
+      # 插件是纯 Kotlin 模块，产物是普通 jar，用 D8 转成 dex 由 App 运行时加载。
+      #
+      # 这里加了一道**必过的断言**：插件的 jar 里绝不能出现 com/pumpkin/plugin/ 的类。
+      # 一旦出现（也就是有人把 compileOnly 改成了 implementation），
+      # PumpkinPlugin 接口就会在两个类加载器里各有一份，
+      # 插件的 instanceof 判断会静默失败 —— 那种问题极难排查，所以宁可在这里构建失败。
+      - name: Build plugin and convert to dex
+        working-directory: android-app
+        run: |
+          gradle :plugins:lan-address:jar --no-daemon --stacktrace
+          JAR=$(ls plugins/lan-address/build/libs/*.jar | grep -v sources | head -1)
+          echo "plugin jar: $JAR"
+          if unzip -l "$JAR" | grep -q 'com/pumpkin/plugin/'; then
+            echo "::error::插件 jar 里混进了 plugin-api 的类（PumpkinPlugin/PluginHost）。"
+            echo "::error::这些类只能由 App 提供，插件必须用 compileOnly 依赖，否则插件的 instanceof 会静默失败。"
+            exit 1
+          fi
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "d8: $BT/d8"
+          mkdir -p plugin-out
+          "$BT/d8" --min-api 26 --output plugin-out "$JAR"
+          cp plugin-out/classes.dex plugin-out/plugin.dex
+          ls -lh plugin-out
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumpkin-plugin-lan-address-${{ steps.stamp.outputs.utc }}
+          path: android-app/plugin-out/plugin.dex
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

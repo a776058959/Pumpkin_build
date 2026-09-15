@@ -79,6 +79,13 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
      * 同时充当 UpdateClient.Progress.isRunning() 的返回值 —— 下载线程靠它判断要不要中止。
      */
     private volatile boolean appUpdateBusy;
+    /**
+     * 插件管理器。
+     *
+     * 插件是运行时用 DexClassLoader 加载的 dex（见 PluginManager 的类注释）——
+     * 加载失败只会体现在「设置 → 插件」那段文字里，不会影响 App 启动。
+     */
+    private com.pumpkin.server.plugin.PluginManager plugins;
 
     /**
      * 已经下好、但因为「安装未知应用」没开而没能装上的更新包。
@@ -111,6 +118,21 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         state.setThemeMode(Prefs.get(this, "theme_mode",
                 com.pumpkin.server.ui.PumpkinPalettes.MODE_DARK));
         state.setAppUpdateSourceLabel(appSourceLabel());
+        // 插件：加载 dex，并把插件声明的设置项灌进 state。
+        // 加载是逐个 try/catch 的（见 PluginManager），坏插件只影响它自己。
+        plugins = new com.pumpkin.server.plugin.PluginManager(this);
+        plugins.setLanProbe(new com.pumpkin.server.plugin.PluginManager.LanProbe() {
+            @Override
+            public String host() {
+                return PumpkinServer.findLanIpv4();
+            }
+
+            @Override
+            public int port() {
+                return 25565;
+            }
+        });
+        reloadPlugins();
         // 界面交给 Compose：三页 + 液态玻璃底栏都在 ui 包里。
         // setContent 必须由 Kotlin 侧调用（@Composable lambda 带 $composer 参数，Java 造不出来）。
         com.pumpkin.server.ui.PumpkinUiBridge.launchPumpkinUi(this, state, this);
@@ -335,9 +357,27 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         }
 
         String lan = PumpkinServer.findLanIpv4();
-        s.setAddrText(lan == null
+        // 插件可以覆盖「对外告知的联机地址」（见 PluginKeys）。
+        // 注意它改的是**你告诉玩家的地址**，不是手机真实的网卡地址 ——
+        // 后者由路由器 DHCP / 系统 WiFi 静态设置决定，应用无权修改。
+        // 服务器监听全部网卡，所以决定玩家能否连上的就是这个地址；
+        // 「复制地址」复制的也是它，因此覆盖会一路生效到剪贴板。
+        String ovHost = plugins == null
+                ? null : plugins.override(com.pumpkin.plugin.PluginKeys.LAN_HOST);
+        String ovPort = plugins == null
+                ? null : plugins.override(com.pumpkin.plugin.PluginKeys.LAN_PORT);
+        String shownHost = (ovHost != null) ? ovHost : lan;
+        int javaPort = 25565;
+        if (ovPort != null) {
+            try {
+                javaPort = Integer.parseInt(ovPort.trim());
+            } catch (Exception ignored) {
+                // 插件填了非数字就退回默认端口，不要因为这行地址整段消失
+            }
+        }
+        s.setAddrText(shownHost == null
                 ? "未检测到局域网 IP（确认已连上 WiFi）"
-                : "Java " + lan + ":25565　·　基岩 " + lan + ":19132");
+                : "Java " + shownHost + ":" + javaPort + "　·　基岩 " + shownHost + ":19132");
         s.setDirText("数据目录 " + ServerPaths.workDir(this).getAbsolutePath());
 
         boolean rootMode = Prefs.getBool(this, "root_mode", false);
@@ -1521,3 +1561,66 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
     }
 }
+
+    // ================================================================ 插件
+
+    /** 重新扫描并加载插件，然后把结果灌进 Compose 状态。 */
+    private void reloadPlugins() {
+        if (plugins == null) {
+            return;
+        }
+        plugins.loadAll();
+        refreshPluginState();
+    }
+
+    /** 把插件的加载结果与声明的设置项同步到 state。 */
+    private void refreshPluginState() {
+        if (state == null || plugins == null) {
+            return;
+        }
+        java.util.List<com.pumpkin.server.plugin.PluginManager.LoadedPlugin> list =
+                plugins.loaded();
+        StringBuilder sb = new StringBuilder();
+        if (list.isEmpty()) {
+            sb.append("没有加载任何插件");
+        } else {
+            sb.append("已加载 ").append(list.size()).append(" 个：");
+            for (int i = 0; i < list.size(); i++) {
+                if (i > 0) {
+                    sb.append("、");
+                }
+                sb.append(list.get(i).name).append(" ").append(list.get(i).version);
+            }
+        }
+        state.setPluginSummary(sb.toString());
+        state.setPluginDir(plugins.pluginDir().getAbsolutePath());
+        state.setPluginLog(plugins.logText());
+
+        state.getPluginSettings().clear();
+        for (com.pumpkin.plugin.PluginSetting st : plugins.settings()) {
+            String v = plugins.override(st.getKey());
+            state.getPluginSettings().add(new com.pumpkin.server.ui.PluginSettingView(
+                    st.getKey(),
+                    st.getTitle(),
+                    st.getKind() == com.pumpkin.plugin.PluginSetting.Kind.TOGGLE,
+                    v == null ? "" : v,
+                    st.getSummary(),
+                    st.getPlaceholder()));
+        }
+    }
+
+    /** 插件设置项改动：写进覆盖板，地址显示随之刷新。 */
+    public void onPluginSettingChangedFromUi(String key, String value) {
+        if (plugins == null || key == null) {
+            return;
+        }
+        plugins.setOverride(key, value);
+        refreshPluginState();
+        refresh();
+    }
+
+    public void reloadPluginsFromUi() {
+        reloadPlugins();
+        refresh();
+        toast("已重新加载插件");
+    }

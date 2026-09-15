@@ -219,6 +219,80 @@ fun SettingsPage(
 
         Spacer(modifier = Modifier.height(14.dp))
 
+        // ---------------------------------------------------------------- 插件
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "插件",
+                    style = MiuixTheme.textStyles.subtitle,
+                    color = PumpkinColors.TextDim,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = state.pluginSummary,
+                    style = MiuixTheme.textStyles.body1,
+                )
+
+                // 插件声明的设置项。**控件由 App 渲染**，插件只声明（标题/形态/说明）——
+                // 这样插件不必依赖 Compose，编译产物就是一个很小的纯 Kotlin dex。
+                state.pluginSettings.forEach { item ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    if (item.isToggle) {
+                        Button(
+                            onClick = {
+                                actions.onPluginSettingChangedFromUi(
+                                    item.key,
+                                    if (item.value == "true") "false" else "true",
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(item.title + "：" + if (item.value == "true") "开" else "关") }
+                    } else {
+                        TextField(
+                            value = item.value,
+                            onValueChange = { actions.onPluginSettingChangedFromUi(item.key, it) },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = if (item.placeholder.isEmpty()) {
+                                item.title
+                            } else {
+                                item.title + "（默认 " + item.placeholder + "）"
+                            },
+                            singleLine = true,
+                        )
+                    }
+                    if (item.summary.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = item.summary,
+                            style = MiuixTheme.textStyles.footnote1,
+                            color = PumpkinColors.TextDim,
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "插件目录：" + state.pluginDir,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = PumpkinColors.TextDim,
+                )
+                if (state.pluginLog.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = state.pluginLog.trim(),
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = PumpkinColors.TextDim,
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Button(
+                    onClick = { actions.reloadPluginsFromUi() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("重新加载插件") }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
         // ---------------------------------------------------------------- 关于
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {

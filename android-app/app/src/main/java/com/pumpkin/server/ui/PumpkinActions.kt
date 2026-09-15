@@ -66,6 +66,12 @@ interface PumpkinActions {
     /** 切换明暗模式；mode 取 PumpkinPalettes.MODE_DARK / MODE_LIGHT / MODE_AUTO。 */
     fun applyThemeModeFromUi(mode: String?)
 
+    /** 插件设置项被改动；value 为空串表示清除该项覆盖。 */
+    fun onPluginSettingChangedFromUi(key: String, value: String)
+
+    /** 重新扫描并加载插件目录。 */
+    fun reloadPluginsFromUi()
+
     /** 打开「App 更新下载源」选择框。 */
     fun showAppSourceDialogFromUi()
 
