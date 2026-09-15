@@ -1560,7 +1560,6 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     private void toast(String s) {
         Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
     }
-}
 
     // ================================================================ 插件
 
@@ -1624,3 +1623,4 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         refresh();
         toast("已重新加载插件");
     }
+}
