@@ -54,13 +54,25 @@ jobs:
 
       - name: Build App APK
         working-directory: android-app
-        run: gradle assembleDebug --no-daemon --stacktrace -PbuildStamp=${{ steps.stamp.outputs.utc }}
+        # 必须出 **release** 包，不能出 debug 包。
+        #
+        # simpleperf 采样把这件事抓出来了：debug 包里
+        #   artQuickToInterpreterBridge / art::interpreter::ExecuteSwitchImplCpp ≈ 4%，
+        #   外加明显的 ConcurrentCopying GC 开销
+        # —— 也就是 ART 根本没做 AOT 编译，整个 Compose 运行时跑在解释器上。
+        # Compose 极度依赖内联，debug 包因此慢一大截；表现出来就是
+        # 「底栏动画像帧数低」。release 包（debuggable=false）会被 dex2oat 编译，
+        # 这类开销直接消失。
+        #
+        # release 与 debug 用**同一把签名密钥**（见 app/build.gradle.kts），
+        # 所以 release 包能直接覆盖安装到已装 debug 包的手机，不用卸载。
+        run: gradle assembleRelease --no-daemon --stacktrace -PbuildStamp=${{ steps.stamp.outputs.utc }}
 
       - name: Collect APK
         shell: bash
         run: |
           mkdir -p apk-out
-          cp android-app/app/build/outputs/apk/debug/app-debug.apk \
+          cp android-app/app/build/outputs/apk/release/app-release.apk \
              "apk-out/pumpkin-app-${{ steps.stamp.outputs.utc }}.apk"
           ls -lh apk-out
 
