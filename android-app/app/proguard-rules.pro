@@ -34,3 +34,15 @@
 # 插件只用反射按类名实例化自己的入口类，那个类在插件的 dex 里，不受这里的规则影响；
 # 但 App 里任何可能被反射碰到的兼容层类也一并保号，避免以后加了东西忘记加规则。
 -keepnames class com.pumpkin.plugin.** { *; }
+
+# Kotlin 标准库也必须保原名（不能只保号）。
+#
+# 原因：插件是**单独编译、没有经过 R8** 的 dex，它会按原始名字引用标准库 ——
+# 实测插件一加载就报 `Failed resolution of: Lkotlin/jvm/internal/Intrinsics;`。
+# R8 默认会把标准库里的类重打包并改名（proguard-android-optimize 自带 repackage），
+# 于是插件按原名找不到东西。
+#
+# 代价：标准库不能再被删减，APK 会大一点、标准库函数也不再被内联。
+# 这是「让插件能跑」必须付的代价 —— 相比把标准库塞进每个插件（每个插件多 1MB 以上），
+# 还是让 App 大一点更划算。
+-keep class kotlin.** { *; }
