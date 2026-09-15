@@ -40,11 +40,11 @@
   真机像素验证：卡片底色三套**精确匹配**，主按钮强调色精确匹配。
 - **沉浸式已修**：状态栏与手势条那一条铺的是 App 自己的渐变，不再是系统色带。
   根因是给 `android.R.id.content` 加了 `setPadding`，露出窗口底色 `#303030`。
-  现在 insets 由 Compose 算，详见 [ANDROID.md](ANDROID.md) 的「沉浸式界面」。
+  现在 insets 由 Compose 算，详见 [ANDROID.md](../../ANDROID.md) 的「沉浸式界面」。
 - **App 自更新打通**（历史上从未成功过）：三个叠加缺陷 ——
   `build-android-apk` 的 Gradle/JDK 与工程脱节（还被 `continue-on-error` 掩盖）、
   只查 `/releases/latest`（那里常常没有 APK）、versionCode 写死。
-  完整复盘见 [docs/app-self-update.md](docs/app-self-update.md)。
+  完整复盘见 [docs/app-self-update.md](app-self-update.md)。
 - **发布链路已补齐**：`apk-only.yml` 以前只出 artifact、从不发 Release，
   导致「改完 UI 只跑了 apk-only」时改动永远到不了用户手里（本地 adb 是新的，Release 是旧的，
   用户点检查更新报「已是最新」）。现在加了 `publish` 开关，CI 自己建 Release。详见「出包流程」。
@@ -60,7 +60,7 @@
   App 现在出的是 `assembleRelease` 而**不是** `assembleDebug` —— 这是性能关键，
   详见下面的「底栏点击卡顿排查」。
 - **原生 Linux 可用**：在手机本机内核上跑真正的 Alpine（chroot），不是 Termux 那种用户态终端。
-  脚本、实测结果与踩过的坑见 [tools/native-linux/](tools/native-linux/)。
+  脚本、实测结果与踩过的坑见 [tools/native-linux/](../../tools/native-linux/)。
 - 术语已统一：源码与文档里不再叫「壳」，一律叫「南瓜坞 / App」。
 - 归档截图（`D:\androidsdk\shots\`）：`immersive.png` vs `immersive_fixed.png`（沉浸式前后）、
   `theme_night.png` / `theme_sakura.png` / `theme_forest.png`（三套配色）、
@@ -137,7 +137,7 @@ minSdk 24 安全；CI 编译一次通过。
    改了会让升级后的用户丢掉全部设置（镜像源、启动方式都在里面）。
 5. 设置页最后一条加速源要滚动才看得到（纯观感，不影响功能）。
 6. **背景图功能**：已做过可行性分析，**结论是先不做**（不简单）。
-   完整拆解与成本估算见 [docs/background-image.md](docs/background-image.md)。
+   完整拆解与成本估算见 [docs/background-image.md](background-image.md)。
 
 ---
 
@@ -430,6 +430,37 @@ R8 的内联对 Compose 是实打实的收益 —— Compose 靠内联消除 lam
 > 一个坑：验证「检查更新」对话框时一度以为被 R8 删坏了，其实是**版本漂移** ——
 > 当时本地包比已发布的还新，检查更新只弹了 Toast「已是最新」，而 **uiautomator 抓不到 Toast**。
 > 发布一个更新的版本后对话框立刻正常。**用 uiautomator 验证时要注意 Toast 是抓不到的。**
+
+## ⚠️ 不可见的 Compose 页面仍然会吃掉点击（2026-09-15，踩过）
+
+**Compose 的绘制遍历和触摸遍历是两套独立的东西。**
+
+- 曾经为了让三个页面常驻组合（省掉切页时的重新组合，实测 90th 38→18ms），
+  用 `drawWithContent { if (visible) drawContent() }` 让不可见的页"不画"。
+- 结果：**节点仍然是全屏大小，照样参与命中测试**。三个页面铺在同一个 Box 里，
+  最上层的设置页即使不可见也接收点击 —— 用户报「很多按钮功能错乱」。
+- 真机实验坐实：在「运行」页点 `(807,1431)`（该处运行页没有可点控件），
+  `palette` 从 `cyan` 变成 `green`。
+
+**正确做法**：用 `Modifier.layout` 把不可见的页报成 **0×0**。
+0 尺寸节点不在任何触摸范围内，而组合与 measure 都保留（滚动位置等状态不丢）。
+
+```kotlin
+Box(
+    modifier = Modifier.layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints)
+        if (visible) layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+        else layout(0, 0) { }
+    },
+) { content() }
+```
+
+**验证脚本：`tools/test-hidden-page-hit.sh`** —— 在运行页点一个"该页没有控件"的坐标，
+然后读 Prefs 看设置有没有被误改。改 UI 层级/可见性之后**必须跑它**，
+别只看代码觉得"应该没问题"。用 `drawWithContent` 那版会真的改掉，0 尺寸版不会。
+
+> 附带一条：页面常驻组合之后，**切页不再销毁页面，滚动位置会保留**。
+> 写测试脚本时要注意（本喵的脚本就被这个坑了一次，以为页面没滚到顶）。
 
 ## 关键约束（改代码前必读，全是踩过的坑）
 
