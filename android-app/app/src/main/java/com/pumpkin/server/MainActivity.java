@@ -1752,11 +1752,32 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         }).start();
     }
 
-    /** 卸载插件，连同它写过的覆盖一起清掉。 */
+    /** 卸载插件：先确认，再删目录并把它写过的覆盖一起清掉。 */
     public void removePluginFromUi(final String id) {
         if (plugins == null || state == null || id == null) {
             return;
         }
+        // 卸载是破坏性的（目录没了、它调过的设置也还原），所以走一趟确认。
+        // 界面上「卸载」和「停用」挨着，误触的代价差很多：
+        // 停用点错了再点回来就行，卸载点错了得重新去商店装。
+        String name = id;
+        for (com.pumpkin.server.plugin.PluginManager.StoreEntry e : storeCache) {
+            if (e.id.equals(id)) {
+                name = e.name;
+                break;
+            }
+        }
+        confirm("确定卸载「" + name + "」吗？它调过的设置会一起还原，之后可以从商店重新安装。",
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        doRemovePlugin(id);
+                    }
+                });
+    }
+
+    /** 真正执行卸载。 */
+    private void doRemovePlugin(final String id) {
         state.setPluginInstalling(id);
         // 删目录很快，但还是放后台：卸载后要重新扫一遍插件
         new Thread(new Runnable() {

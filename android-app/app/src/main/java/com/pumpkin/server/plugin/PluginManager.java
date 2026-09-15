@@ -276,6 +276,17 @@ public final class PluginManager {
             // 后声明的覆盖先声明的：两个插件抢同一个键时，最后一个说了算，
             // 但至少不会两个控件打架（只留一个）。
             settings.put(setting.getKey(), setting);
+            // 也记进「这个插件拥有哪些键」。
+            //
+            // 这一步是必须的，别删：设置项的值是**用户**在界面上写的
+            //（走 MainActivity.onPluginSettingChangedFromUi → setOverride），
+            // 不经过 HostImpl.set()，所以只在 set() 里记的话，
+            // 卸载插件时这些键就没人认领 —— 实测卸载后覆盖值会留在 Prefs 里，
+            // 插件再也装不回来也清不掉的那个值会一直生效。
+            //
+            // 记在 Prefs 里而不是内存里，是因为卸载时插件可能处于**停用**状态：
+            // 停用的插件不会被加载、也就不会调到这里，只能靠上次记下的清单。
+            rememberKey(pluginId, setting.getKey());
         }
     }
 
@@ -383,7 +394,14 @@ public final class PluginManager {
         }
         File dir = new File(pluginDir(), e.id);
         if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
-            throw new java.io.IOException("建不了插件目录：" + dir.getAbsolutePath());
+            // 这条错误实际出现过，值得写清楚：
+            // 早先验证插件时是用 root/adb 把文件推进 filesDir/plugins 的，
+            // 于是 plugins 目录的属主变成 root:root 755 —— App 能读能加载，
+            // 但再也建不了新的子目录，表现成「装插件失败」，看着像功能坏了。
+            // 清掉那个目录（App 会自己重建，属主就是自己）即可。
+            throw new java.io.IOException("建不了插件目录 " + dir.getAbsolutePath()
+                    + "（插件目录不可写；如果以前用 root/adb 往里推过文件，"
+                    + "把 files/plugins 整个删掉让 App 重建）");
         }
         updates.downloadTo(url, new File(dir, "plugin.dex"), progress);
         // plugin.json 由索引里的 entry 生成 —— 使用者不需要知道这个文件的存在
