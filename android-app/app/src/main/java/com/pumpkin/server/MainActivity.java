@@ -1271,7 +1271,8 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                                         "服务器上发布了新版南瓜坞："
                                                 + (asset.tag.isEmpty() ? asset.name : asset.tag)
                                                 + "\n当前已装：" + versionName()
-                                                + "\n\n要现在下载吗？下载完点开安装包覆盖安装即可。",
+                                                + "\n\n要现在下载吗？下完会自动打开系统安装器，"
+                                                + "确认覆盖安装即可。",
                                         "下载",
                                         "以后");
                             } else {
