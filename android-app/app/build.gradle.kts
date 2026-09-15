@@ -1,3 +1,11 @@
+// 注意：这些 import 必须写在 plugins 块之前。
+// 不能在脚本体里用 java.util.Locale 这类全限定名 —— Gradle Kotlin DSL 里的裸 `java`
+// 会先被解析成 JavaPluginExtension（java 插件扩展），于是报 Unresolved reference 'util'。
+import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.util.Date
+import java.util.Locale
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -23,7 +31,7 @@ plugins {
 val buildStamp: String =
     (project.findProperty("buildStamp") as String?)?.takeIf { it.isNotBlank() }
         ?: System.getenv("PUMPKIN_BUILD_STAMP")?.takeIf { it.isNotBlank() }
-        ?: java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(java.util.Date())
+        ?: SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
 
 val computedVersionCode: Int = run {
     val m = Regex("(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})").find(buildStamp)
@@ -33,7 +41,7 @@ val computedVersionCode: Int = run {
         20000000
     } else {
         val v = m.groupValues
-        val epochDay = java.time.LocalDate.of(v[1].toInt(), v[2].toInt(), v[3].toInt()).toEpochDay()
+        val epochDay = LocalDate.of(v[1].toInt(), v[2].toInt(), v[3].toInt()).toEpochDay()
         val hhmm = (v[4] + v[5]).toInt()
         (epochDay * 10000L + hhmm).toInt()
     }
