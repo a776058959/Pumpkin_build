@@ -1,0 +1,25 @@
+fix(ui): restore edge-to-edge; the system bars showed a grey band
+
+Reported as "immersion is gone, top and bottom". It was.
+
+MainActivity padded android.R.id.content by the system bar insets. Nothing
+Compose draws covers that padding, so what showed through was the window
+background - Theme.Material's #303030. Measured on the device: rows 0-117 and
+2356-2399 were exactly #303030, while the app's own gradient is #171A22 at the
+top fading to #0E1016 at the bottom. Hence two grey bands.
+
+Inset handling moves to Compose, which is where the content that has to avoid the
+bars actually lives:
+
+  - the gradient fills the whole window, including behind both bars
+  - the pages take WindowInsets.statusBars as top padding
+  - LiquidGlassNavBar already resolves navigationBars on its own, and was in fact
+    being double-counted before (root padding plus its own)
+
+The backdrop recorder stays full-screen and only the inner Box is inset;
+shrinking the recorded layer would desync the coordinates the glass bar samples
+with, and the blur would drift.
+
+Window background now matches the gradient's top colour, in themes.xml (what the
+system paints before the app's first frame) and at runtime. That also removes the
+grey flash on cold start, which had the same #303030 root cause as the bands.

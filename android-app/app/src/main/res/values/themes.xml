@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      只做两件事：改窗口底色、把系统栏设成透明。
+
+      为什么需要自定义主题：Theme.Material.NoActionBar 的 windowBackground 是 #303030，
+      而本应用是接近纯黑的深色界面。系统栏设成透明后，那一条露出的就是窗口底色，
+      于是上下各出现一条明显的灰带 —— 沉浸感全没了。
+      把底色改成和界面渐变顶色一致，系统栏那条就自然融进去了。
+
+      注意：这里不碰 windowIsTranslucent / windowNoTitle 之类会影响 insets 分发的属性。
+      应用 targetSdk=28，系统栏仍走 MainActivity 里那套 legacy systemUiVisibility。
+    -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+</resources>

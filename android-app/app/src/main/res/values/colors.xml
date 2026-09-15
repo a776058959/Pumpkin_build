@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      窗口底色 = 界面渐变的顶色（PumpkinApp 里 dark 主题的 bgTop）。
+
+      系统在应用画出第一帧之前会先铺这个颜色（所谓 starting window），
+      所以这里必须跟界面顶部的颜色一致，否则冷启动会闪一下别的颜色。
+      在换掉它之前，底色是 Theme.Material 默认的 #303030 ——
+      那也正是「上下两条灰带」的灰。
+    -->
+    <color name="window_background">#FF171A22</color>
+</resources>

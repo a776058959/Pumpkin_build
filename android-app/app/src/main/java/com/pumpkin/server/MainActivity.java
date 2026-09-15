@@ -14,7 +14,6 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.view.View;
 import android.view.Window;
-import android.view.WindowInsets;
 import android.widget.Toast;
 
 import java.io.File;
@@ -93,12 +92,13 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         // 界面交给 Compose：三页 + 液态玻璃底栏都在 ui 包里。
         // setContent 必须由 Kotlin 侧调用（@Composable lambda 带 $composer 参数，Java 造不出来）。
         com.pumpkin.server.ui.PumpkinUiBridge.launchPumpkinUi(this, state, this);
-        // insets 仍由这里统一处理（沿用原来那套 legacy systemUiVisibility + setPadding），
-        // 不引入 API 30 的新接口 —— 新接口历史上会导致本应用启动即崩。
-        View content = findViewById(android.R.id.content);
-        if (content != null) {
-            applyInsets(content);
-        }
+        // insets 交给 Compose 自己算：状态栏内边距加在页面外层（PumpkinApp），
+        // 导航栏由底栏自理（LiquidGlassNavBar 读 WindowInsets.navigationBars）。
+        //
+        // 这里**刻意不再**给 android.R.id.content 加 padding。加过一版，后果是系统栏
+        // 那一条没有 Compose 内容覆盖，直接露出窗口背景色（Theme.Material 的 #303030），
+        // 屏幕上就是上下两条灰带 —— 沉浸感全没了。
+        // 正确分工：渐变背景铺满整屏（含系统栏底下），该避让的内容由 Compose 内缩。
         requestNotificationPermissionIfNeeded();
         autoCheckForUpdate();
         ui.post(ticker);
@@ -139,7 +139,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     }
 
     /**
-     * 沉浸式：让窗口内容铺到状态栏与导航栏下面，消除上下两条系统黑边。
+     * 沉浸式：让窗口内容铺到状态栏与导航栏下面，消除上下两条系统栏色带。
      * 状态栏/导航栏设为透明，背景由我们自己的渐变负责。
      */
     private void applyEdgeToEdge() {
@@ -153,33 +153,15 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        // 窗口底色设成界面渐变的顶色。主题默认是 Theme.Material 的 #303030，
+        // 在 Compose 画出第一帧之前会先露出来 —— 冷启动时闪一条灰带就是它。
+        // 主题里也设了同一颜色（themes.xml），那里管「系统画的第一帧」，这里管运行时。
+        window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF171A22));
     }
 
-    /** 把系统栏占用的高度变成内边距，内容不会被状态栏或手势条挡住。 */
-    private void applyInsets(final View root) {
-        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
-            @Override
-            public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
-                int top;
-                int bottom;
-                try {
-                    // 一律使用旧接口，避免引用 API 30 才有的 Insets / WindowInsets.Type
-                    top = insets.getSystemWindowInsetTop();
-                    bottom = insets.getSystemWindowInsetBottom();
-                } catch (Throwable t) {
-                    // 任何异常都不要让界面崩掉，退化为无内边距
-                    return insets;
-                }
-                // 只在值真正变化时改 padding：否则「改 padding → 重新分发 insets」会互相触发，
-                // 在部分 ROM 上形成死循环导致启动即闪退。
-                if (v.getPaddingTop() != top || v.getPaddingBottom() != bottom) {
-                    v.setPadding(0, top, 0, bottom);
-                }
-                return insets;
-            }
-        });
-        root.requestApplyInsets();
-    }
+    // 曾经这里有个 applyInsets(root)：把系统栏高度 setPadding 到 android.R.id.content。
+    // 已删除 —— 它正是「上下两条灰带」的元凶（padding 出来的那块没有 Compose 内容，
+    // 露出窗口底色）。现在内缩由 Compose 的 WindowInsets 处理。
 
     @Override
     protected void onResume() {

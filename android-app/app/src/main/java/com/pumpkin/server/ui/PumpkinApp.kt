@@ -14,7 +14,10 @@ package com.pumpkin.server.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -61,15 +64,23 @@ fun PumpkinApp(
             )
 
             // ---------- 内容层：录进背板，供底栏模糊采样 ----------
+            // 背板必须整屏录（底栏按屏幕坐标采样），所以状态栏内边距加在里层，
+            // 而不是把这个 Box 缩小 —— 缩了背板坐标就跟底栏对不上，模糊会错位。
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .layerBackdrop(contentBackdrop),
             ) {
-                when (state.page) {
-                    0 -> RunPage(state = state, actions = actions)
-                    1 -> UpdatePage(state = state, actions = actions)
-                    else -> SettingsPage(state = state, actions = actions)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.statusBars),
+                ) {
+                    when (state.page) {
+                        0 -> RunPage(state = state, actions = actions)
+                        1 -> UpdatePage(state = state, actions = actions)
+                        else -> SettingsPage(state = state, actions = actions)
+                    }
                 }
             }
 
