@@ -108,6 +108,8 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         // 恢复配色偏好。Compose 侧读 state.paletteId 决定用哪套主题；
         // 取到空串（没存过）时由 PumpkinPalettes 回落到默认配色。
         state.setPaletteId(Prefs.get(this, "palette", ""));
+        state.setThemeMode(Prefs.get(this, "theme_mode",
+                com.pumpkin.server.ui.PumpkinPalettes.MODE_DARK));
         state.setAppUpdateSourceLabel(appSourceLabel());
         // 界面交给 Compose：三页 + 液态玻璃底栏都在 ui 包里。
         // setContent 必须由 Kotlin 侧调用（@Composable lambda 带 $composer 参数，Java 造不出来）。
@@ -174,12 +176,12 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
     }
 
     /**
-     * 系统栏图标颜色跟着配色走。
+     * 系统栏图标颜色跟着明暗走。
      *
      * 只用老的 setSystemUiVisibility：本应用 targetSdk=28，这套接口全程有效，
      * 且比 setDecorFitsSystemWindows / InsetsController 稳得多（新接口曾导致启动即崩）。
      *
-     * 亮色配色下必须加 LIGHT_STATUS_BAR / LIGHT_NAVIGATION_BAR ——
+     * 浅色下必须加 LIGHT_STATUS_BAR / LIGHT_NAVIGATION_BAR ——
      * 否则白色图标压在浅色渐变上根本看不见，用户会以为状态栏坏了。
      */
     private void applySystemBarIcons() {
@@ -190,7 +192,7 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
-        if (com.pumpkin.server.ui.PumpkinPalettes.isLight(Prefs.get(this, "palette", ""))) {
+        if (!isDarkTheme()) {
             flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
             // LIGHT_NAVIGATION_BAR 是 API 26 加的，本应用 minSdk 26，可以直接用。
             flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
@@ -198,13 +200,33 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         window.getDecorView().setSystemUiVisibility(flags);
     }
 
+    /**
+     * 当前是不是深色。
+     *
+     * 「跟随系统」这件事只有 Java 侧看得到 Configuration（系统深色设置属于 Resources 配置），
+     * 所以明暗在这里定，Compose 侧按同一套规则再算一遍（见 PumpkinApp）。
+     */
+    private boolean isDarkTheme() {
+        String mode = Prefs.get(this, "theme_mode", com.pumpkin.server.ui.PumpkinPalettes.MODE_DARK);
+        if (com.pumpkin.server.ui.PumpkinPalettes.MODE_LIGHT.equals(mode)) {
+            return false;
+        }
+        if (com.pumpkin.server.ui.PumpkinPalettes.MODE_AUTO.equals(mode)) {
+            return (getResources().getConfiguration().uiMode
+                    & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                    == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        }
+        return true;
+    }
+
     // 曾经这里有个 applyInsets(root)：把系统栏高度 setPadding 到 android.R.id.content。
     // 已删除 —— 它正是「上下两条灰带」的元凶（padding 出来的那块没有 Compose 内容，
     // 露出窗口底色）。现在内缩由 Compose 的 WindowInsets 处理。
 
-    /** 当前配色偏好对应的窗口底色；偏好缺失时由 PumpkinPalettes 回落到默认配色。 */
+    /** 当前色相在当前明暗下的窗口底色。 */
     private int paletteWindowColor() {
-        return com.pumpkin.server.ui.PumpkinPalettes.windowColor(Prefs.get(this, "palette", ""));
+        return com.pumpkin.server.ui.PumpkinPalettes.windowColor(
+                Prefs.get(this, "palette", ""), isDarkTheme());
     }
 
     /** App 更新下载源的显示名。空前缀 = 官方直连。 */
@@ -478,6 +500,44 @@ public class MainActivity extends ComponentActivity implements com.pumpkin.serve
         }
         applySystemBarIcons();
         toast("已切换配色：" + com.pumpkin.server.ui.PumpkinPalettes.nameOf(pid));
+    }
+
+    /**
+     * 切换明暗模式（深色 / 浅色 / 自动）。
+     *
+     * @param mode PumpkinPalettes.MODE_DARK / MODE_LIGHT / MODE_AUTO。
+     */
+    public void applyThemeModeFromUi(String mode) {
+        String m = mode == null ? com.pumpkin.server.ui.PumpkinPalettes.MODE_DARK : mode.trim();
+        Prefs.put(this, "theme_mode", m);
+        if (state != null) {
+            state.setThemeMode(m);
+        }
+        // 窗口底色与系统栏图标都要按新的明暗重算：
+        // 切到浅色后如果状态栏还是白图标，就等于状态栏没了。
+        Window window = getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(paletteWindowColor()));
+        }
+        applySystemBarIcons();
+        toast("已切换为" + com.pumpkin.server.ui.PumpkinPalettes.modeLabel(m));
+    }
+
+    /**
+     * 「跟随系统」时，系统深色开关一变，Configuration 就变了。
+     *
+     * manifest 里把 uiMode 加进了 configChanges，所以这里不会被重建
+     *（重建会打断正在进行的下载），而是走这个回调 —— 只重算系统栏图标。
+     * Compose 侧自己会读 LocalConfiguration，不需要在这里管。
+     */
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        applySystemBarIcons();
+        Window window = getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(paletteWindowColor()));
+        }
     }
 
     public void clearVersionsFromUi() {

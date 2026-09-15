@@ -284,10 +284,14 @@ fun SettingsPage(
 // ================================================================ 配色选择
 
 /**
- * 配色方案选择。
+ * 外观：明暗（深色/浅色/自动）+ 色相。
  *
- * 每行放两套。色板画成「背景顶色 → 强调色」的渐变圆点，不用逐个点开就能看出每套的调子。
- * 选中项用**该配色自己的**容器色打底，这样不管当前用的是哪套主题，每个选项都显示得清楚。
+ * 这两件是**独立的轴**：先选深浅，再选颜色，组合自由。
+ * 早先把「亮色」也做成一整套配色混在深色里，导致换颜色就顺带换了明暗，想表达
+ * 「蓝的深色 + 绿的浅色」根本做不到。
+ *
+ * 色板画成「背景顶色 → 强调色」的渐变圆点，不用逐个点开就能看出每套的调子；
+ * 用的是**当前明暗下**那份颜色，所以亮色模式下看到的色板也是亮色的。
  */
 @Composable
 private fun PaletteSection(
@@ -295,9 +299,31 @@ private fun PaletteSection(
     actions: PumpkinActions,
 ) {
     val current = PumpkinPalettes.byId(state.paletteId)
+    val dark = LocalPumpkinDark.current
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "外观",
+                style = MiuixTheme.textStyles.subtitle,
+                color = PumpkinColors.TextDim,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "明暗与颜色是两件独立的事：「自动」= 跟随系统的深色模式设置。",
+                style = MiuixTheme.textStyles.footnote1,
+                color = PumpkinColors.TextDim,
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ModeChip("深色", PumpkinPalettes.MODE_DARK, state.themeMode, actions, Modifier.weight(1f))
+                ModeChip("浅色", PumpkinPalettes.MODE_LIGHT, state.themeMode, actions, Modifier.weight(1f))
+                ModeChip("自动", PumpkinPalettes.MODE_AUTO, state.themeMode, actions, Modifier.weight(1f))
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             Text(
                 text = "配色",
                 style = MiuixTheme.textStyles.subtitle,
@@ -319,12 +345,13 @@ private fun PaletteSection(
                     pair.forEach { palette ->
                         PaletteChip(
                             palette = palette,
+                            scheme = palette.scheme(dark),
                             selected = palette.id == current.id,
                             onClick = { actions.applyPaletteFromUi(palette.id) },
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    // 配色数是奇数时补个空位，否则最后一行唯一的卡会被拉成整行宽。
+                    // 色相数是奇数时补个空位，否则最后一行唯一的卡会被拉成整行宽。
                     if (pair.size == 1) {
                         Spacer(modifier = Modifier.weight(1f))
                     }
@@ -335,10 +362,31 @@ private fun PaletteSection(
     }
 }
 
-/** 单个配色选项。色板用该配色自己的颜色画，与当前主题无关。 */
+/** 明暗模式的一个选项。 */
+@Composable
+private fun ModeChip(
+    label: String,
+    mode: String,
+    current: String,
+    actions: PumpkinActions,
+    modifier: Modifier = Modifier,
+) {
+    Button(
+        onClick = { actions.applyThemeModeFromUi(mode) },
+        modifier = modifier,
+        colors = if (mode == current) {
+            ButtonDefaults.buttonColorsPrimary()
+        } else {
+            ButtonDefaults.buttonColors()
+        },
+    ) { Text(label) }
+}
+
+/** 单个色相选项。色板用**当前明暗下**该色相的颜色画。 */
 @Composable
 private fun PaletteChip(
     palette: PumpkinPalette,
+    scheme: PumpkinScheme,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -346,7 +394,7 @@ private fun PaletteChip(
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) palette.accentContainer else palette.surfaceHigh)
+            .background(if (selected) scheme.accentContainer else scheme.surfaceHigh)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -355,20 +403,20 @@ private fun PaletteChip(
             modifier = Modifier
                 .size(18.dp)
                 .clip(CircleShape)
-                .background(Brush.horizontalGradient(listOf(palette.bgTop, palette.accent))),
+                .background(Brush.horizontalGradient(listOf(scheme.bgTop, scheme.accent))),
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = palette.name,
             style = MiuixTheme.textStyles.body2,
-            color = if (selected) palette.accent else PumpkinColors.Text,
+            color = if (selected) scheme.accent else PumpkinColors.Text,
             modifier = Modifier.weight(1f),
         )
         if (selected) {
             Text(
                 text = "✓",
                 style = MiuixTheme.textStyles.body2,
-                color = palette.accent,
+                color = scheme.accent,
                 fontWeight = FontWeight.Bold,
             )
         }

@@ -122,11 +122,18 @@ class PumpkinUiState {
     var mirror by mutableStateOf("")
 
     /**
-     * 选中的配色方案 id（见 PumpkinPalettes）。
+     * 选中的配色方案 id（见 PumpkinPalettes）。只管**色相**，不管明暗。
      *
-     * 空串表示还没读到偏好，PumpkinTheme 会回落到默认配色。
+     * 空串表示还没读到偏好，PumpkinTheme 会回落到默认。
      */
     var paletteId by mutableStateOf("")
+
+    /**
+     * 主题明暗模式："dark" / "light" / "auto"（跟随系统）。
+     *
+     * 与 [paletteId] 是**两条独立的轴** —— 色相和明暗可以自由组合。
+     */
+    var themeMode by mutableStateOf(PumpkinPalettes.MODE_DARK)
 
     /** 南瓜坞版本号（关于页用）。 */
     var appVersion by mutableStateOf("")

@@ -12,7 +12,15 @@
 
 package com.pumpkin.server.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,45 +54,76 @@ fun PumpkinApp(
     state: PumpkinUiState,
     actions: PumpkinActions,
 ) {
-    // 配色从 state 读（Java 侧从偏好里恢复）。传给 PumpkinTheme 后，
-    // 组件通过 PumpkinColors.Accent / Text / TextDim 取到的就是这套方案的颜色。
+    // 色相与明暗是两条独立的轴：色相从 state 读，「跟随系统」只能在这里读系统设置。
     val palette = PumpkinPalettes.byId(state.paletteId)
+    val systemDark = isSystemInDarkTheme()
+    val dark = when (state.themeMode) {
+        PumpkinPalettes.MODE_LIGHT -> false
+        PumpkinPalettes.MODE_AUTO -> systemDark
+        else -> true
+    }
 
-    PumpkinTheme(palette = palette) {
+    PumpkinTheme(palette = palette, dark = dark) {
         // 底栏模糊的采样源：必须包住「所有会出现在底栏背后的内容」。
         val contentBackdrop = rememberLayerBackdrop()
 
-        // 渐变两端直接用配色自带的颜色。深色/亮色由配色自己声明，
-        // 这里不再单独判断 —— 否则会出现「亮色配色 + 深色渐变」这种自相矛盾的组合。
-        // 窗口底色也跟着 bgTop 走（见 MainActivity），冷启动那一帧与这里画的顶色一致，不会闪。
-        val bgTop = palette.bgTop
-        val bgBottom = palette.bgBottom
+        // 取当前明暗下那份具体颜色。
+        val scheme = palette.scheme(dark)
+        val bgTop = scheme.bgTop
+        val bgBottom = scheme.bgBottom
 
         Box(modifier = Modifier.fillMaxSize()) {
-            // ---------- 渐变背景（最底层，不进背板：玻璃底下也有底色可透） ----------
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Brush.verticalGradient(listOf(bgTop, bgBottom))),
-            )
-
-            // ---------- 内容层：录进背板，供底栏模糊采样 ----------
-            // 背板必须整屏录（底栏按屏幕坐标采样），所以状态栏内边距加在里层，
+            // ---------- 背景 + 内容：**一起**录进背板 ----------
+            //
+            // 背景必须进背板。以前它被刻意排除（原注释写「玻璃底下也有底色可透」），
+            // 后果是：底栏背后没有内容时，背板那一块是空的，模糊采样拿到的是空/黑，
+            // 40% 透白的胶囊压在黑上就显成灰色 —— 白色背景下最明显。
+            //
+            // 道理上玻璃要模糊的本来就该是「它背后真实的样子」，而背景就是背后的一部分。
+            // 背板仍要整屏录（底栏按屏幕坐标采样），内边距加在里层，
             // 而不是把这个 Box 缩小 —— 缩了背板坐标就跟底栏对不上，模糊会错位。
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .layerBackdrop(contentBackdrop),
             ) {
+                // 渐变背景（最底层）
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.verticalGradient(listOf(bgTop, bgBottom))),
+                )
+
+                // 内容层：该避让系统栏的部分由这里内缩
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.statusBars),
                 ) {
-                    when (state.page) {
-                        0 -> RunPage(state = state, actions = actions)
-                        1 -> UpdatePage(state = state, actions = actions)
-                        else -> SettingsPage(state = state, actions = actions)
+                    // 页面切换加淡入淡出 + 轻微横移，方向跟着导航顺序走。
+                    //
+                    // 以前这里是硬切：底栏胶囊在平滑滑动，内容却"啪"地整块换掉，
+                    // 两者节奏对不上 —— 看起来就像胶囊动画出了问题，其实是缺这一段过渡。
+                    // 时长（200-240ms）与胶囊弹簧的行程量级对齐。
+                    AnimatedContent(
+                        targetState = state.page,
+                        transitionSpec = {
+                            val dir = if (targetState >= initialState) 1 else -1
+                            (
+                                fadeIn(tween(200)) +
+                                    slideInHorizontally(tween(240)) { w -> dir * w / 12 }
+                                ).togetherWith(
+                                fadeOut(tween(140)) +
+                                    slideOutHorizontally(tween(240)) { w -> -dir * w / 12 },
+                            )
+                        },
+                        label = "page",
+                    ) { page ->
+                        when (page) {
+                            0 -> RunPage(state = state, actions = actions)
+                            1 -> UpdatePage(state = state, actions = actions)
+                            else -> SettingsPage(state = state, actions = actions)
+                        }
                     }
                 }
             }

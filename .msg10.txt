@@ -1,0 +1,43 @@
+feat(theme): hues and light/dark as separate axes; fix grey glass; smooth the tap
+
+Three issues from one round of feedback.
+
+1. Palettes are hues again; light/dark is its own axis.
+
+Folding light schemes into the palette list conflated two independent choices -
+picking a colour also flipped the brightness, so "dark blue with light green" was
+inexpressible. Palettes are now seven hues (blue / green / orange / pink / cyan /
+purple / neutral), each carrying a dark and a light scheme, plus a separate mode
+switch offering 深色 / 浅色 / 自动 (follow system).
+
+isLight moved onto the scheme, and the mode is now resolved in two places by
+necessity: Compose reads isSystemInDarkTheme(), Java reads the Configuration -
+"follow system" is a Resources configuration, and only the Java side sits next to
+the Activity that must set the system bar icon colour. uiMode joins configChanges
+so a system theme flip does not recreate the Activity and abort a running download.
+
+The four new light schemes were checked with the WCAG formula before being written,
+after the earlier round where the delegated values were asserted to pass and four
+of them did not.
+
+2. The glass bar no longer turns grey over empty light background.
+
+The gradient was deliberately kept out of the backdrop the glass samples ("so the
+base colour shows through"). Where nothing was drawn behind the bar the sample was
+empty, and a 40%-white capsule composited over that reads grey - worst on white,
+which is exactly what was reported. The gradient is now recorded together with the
+content: what the glass blurs should be what is actually behind it, and the
+background is part of that.
+
+3. Tapping no longer holds the pressed size for the whole travel.
+
+onDragStarted animates the value toward the pressed tab, so a tap starts a real
+glide. release() then waited for that glide to complete before shrinking, which left
+the pill at 1.39x for the entire journey - as if the user were holding it. It now
+waits only when the finger actually moved, which is the case the wait was written
+for. Dragging is untouched.
+
+Also adds the page transition the user suspected: content used to swap instantly
+while the pill glided, and that mismatch alone reads as the animation being broken.
+Pages now cross-fade with a small horizontal offset over 200-240ms, roughly the
+pill's travel time.

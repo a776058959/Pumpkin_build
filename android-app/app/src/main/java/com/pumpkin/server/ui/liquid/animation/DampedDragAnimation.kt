@@ -63,6 +63,14 @@ internal class DampedDragAnimation(
     private var pressJob: Job? = null
     private var releaseJob: Job? = null
 
+    /**
+     * 这一次按下之后手指有没有真的移动过。
+     *
+     * 用来区分「拖拽」和「点一下」—— 两者都走同一套手势回调，
+     * 但松手后的表现必须不同（见 [release]）。
+     */
+    private var dragged = false
+
     private val velocityTracker = VelocityTracker()
 
     private val startMark = TimeSource.Monotonic.markNow()
@@ -79,6 +87,7 @@ internal class DampedDragAnimation(
     val modifier: Modifier = Modifier.pointerInput(Unit) {
         inspectDragGestures(
             onDragStart = { down ->
+                dragged = false
                 onDragStarted(down.position)
                 press()
             },
@@ -91,6 +100,9 @@ internal class DampedDragAnimation(
                 release()
             },
         ) { change, dragAmount ->
+            if (dragAmount != Offset.Zero) {
+                dragged = true
+            }
             val isInside = canDrag(change.position)
             val wasInside = canDrag(change.previousPosition)
             if (isInside && wasInside) {
@@ -114,7 +126,14 @@ internal class DampedDragAnimation(
         releaseJob?.cancel()
         releaseJob = animationScope.launch {
             withFrameMillis { }
-            if (value != targetValue) {
+            // 只有真的拖过，才等值动画落定再缩小。
+            //
+            // 这个等待的本意是「拖拽松手后让胶囊先滑到位、再缩回原大小」。
+            // 但单纯点一下也会走到这里，而点击时值动画正被 onDragStarted 驱动着全速飞 ——
+            // 于是胶囊会顶着「按住不放」的 1.39 倍大小一路滑过去，看着像被捏着走，很怪。
+            // 官方实现里点击时值动画恰好是空操作，那个 if 自然不成立；
+            // 这里显式区分，才能既保住拖拽手感、又不让点击膨着滑。
+            if (dragged && value != targetValue) {
                 val threshold = (valueRange.endInclusive - valueRange.start) * 0.025f
                 snapshotFlow { valueAnimation.value }.first { abs(it - valueAnimation.targetValue) < threshold }
             }

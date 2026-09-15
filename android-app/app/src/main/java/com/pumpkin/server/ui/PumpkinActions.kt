@@ -60,8 +60,11 @@ interface PumpkinActions {
     /** 点选某个 GitHub 加速源；prefix 为空串表示直连。 */
     fun applyMirrorFromUi(prefix: String?)
 
-    /** 点选某套配色方案；id 见 PumpkinPalettes，null 表示回落到默认。 */
+    /** 点选某套配色方案（只管色相）；id 见 PumpkinPalettes，null 表示回落到默认。 */
     fun applyPaletteFromUi(id: String?)
+
+    /** 切换明暗模式；mode 取 PumpkinPalettes.MODE_DARK / MODE_LIGHT / MODE_AUTO。 */
+    fun applyThemeModeFromUi(mode: String?)
 
     /** 打开「App 更新下载源」选择框。 */
     fun showAppSourceDialogFromUi()
