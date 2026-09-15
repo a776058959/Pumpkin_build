@@ -45,6 +45,10 @@
   `build-android-apk` 的 Gradle/JDK 与工程脱节（还被 `continue-on-error` 掩盖）、
   只查 `/releases/latest`（那里常常没有 APK）、versionCode 写死。
   完整复盘见 [docs/app-self-update.md](docs/app-self-update.md)。
+- **发布链路已补齐**：`apk-only.yml` 以前只出 artifact、从不发 Release，
+  导致「改完 UI 只跑了 apk-only」时改动永远到不了用户手里（本地 adb 是新的，Release 是旧的，
+  用户点检查更新报「已是最新」）。现在加了 `publish` 开关，CI 自己建 Release。详见「出包流程」。
+  最新已发布：`Custom-20260915-0745`（versionCode `207110745`，带 `pumpkin-shell.apk`）。
 - **原生 Linux 可用**：在手机本机内核上跑真正的 Alpine（chroot），不是 Termux 那种用户态终端。
   脚本、实测结果与踩过的坑见 [tools/native-linux/](tools/native-linux/)。
 - 术语已统一：源码与文档里不再叫「壳」，一律叫「南瓜坞 / App」。
@@ -225,24 +229,64 @@ return r;
 
 | 工作流 | 用途 |
 |---|---|
-| `.github/workflows/apk-only.yml` | **只重打包 App**，几十秒出包（改 UI 用这个） |
-| `.github/workflows/build.yml` | 定时（每 2 小时比较上游 SHA，无新提交不构建）+ 全平台构建 + 发布 Release + 记录基线 |
+| `.github/workflows/apk-only.yml` | **只重打包 App**，约 1 分钟出包（改 UI 用这个）。默认**只出 artifact**，勾 `publish` 才发 Release |
+| `.github/workflows/build.yml` | 定时（每 2 小时比较上游 SHA，无新提交不构建）+ 全平台构建 + 发布 Release + 记录基线。**耗时 1 小时以上** |
 | `.github/workflows/prune-dryrun.yml` | 手动检查 Release 保留策略会删什么（只打印不删） |
 
 Release 保留策略脚本：`.github/scripts/prune-releases.sh`
 （<1月全留 / 1-2月每周留一个 / 2-12月每月留一个 / >1年删除）
 
-## 出包流程（每次改完 UI 都走这套）
+### ⚠️ apk-only 默认不发布 —— 这是最容易犯的错
+
+`apk-only` 默认**只产出 Actions artifact，不创建 Release**。
+而 **artifact 用户是看不见的** —— App 的「检查更新」读的是 Releases。
+
+踩过的坑：连续几轮 UI 改动都只跑了 apk-only（没勾 publish），
+本地 adb 装的是新包、看起来一切正常，但 Releases 里还停在旧版。
+用户点「检查更新」报「已是最新」—— 因为**发布渠道里确实没有更新的东西**，
+不是检查功能坏了。判断上很容易误以为「我这边是好的」。
+
+**出包后必做的一致性核对**：
+
+```powershell
+# 手机上装的
+D:\adb-fastboot\adb.exe shell "dumpsys package com.pumpkin.server | grep -E 'versionCode|versionName'"
+# 最新 Release 的 tag
+#   GET /repos/a776058959/Pumpkin_build/releases/latest  → tag_name
+```
+
+`Custom-YYYYMMDD-HHMM` 的 versionCode = `epochDay * 10000 + HHMM`
+（例：`Custom-20260915-0745` → `207110745`）。
+
+**手机上装的必须 ≤ 最新 Release 的 versionCode**。
+否则就是「本地是新的、发出去的是旧的」，用户永远收不到更新。
+
+## 出包流程
 
 1. 改 `D:\Pumpkin_build\android-app\` 里的源码
-2. 提交并 push 到 `https://github.com/a776058959/Pumpkin_build.git` 的 `main`
-   （push 前先 `git pull --rebase`，因为 `record` job 会自动往 main 提交 `.github/upstream-lock.txt`）
-3. 触发构建：`POST /repos/a776058959/Pumpkin_build/actions/workflows/apk-only.yml/dispatches`，body `{"ref":"main"}`
-4. 等约 1-3 分钟 → 从该 run 的 artifacts 下载 `pumpkin-shell-<日期>.apk`
-5. **发布**：删掉 Release（id `388172081`）里旧的 `pumpkin-shell.apk`，再把新的以**同名**上传
-   （`POST https://uploads.github.com/repos/a776058959/Pumpkin_build/releases/388172081/assets?name=pumpkin-shell.apk`）
-6. 桌面留一份最新的，旧的移到 `桌面\pumpkin-apk-旧版本\`
-7. **真机直装**（快）：`D:\adb-fastboot\adb.exe install -r 桌面\pumpkin-shell.apk`
+2. 提交并 push 到 `main`
+   （push 前先 `git fetch` + `git rebase FETCH_HEAD`，因为 `record` job 会自动往 main 提交 `.github/upstream-lock.txt`）
+3. 触发构建 —— **要发给用户就带上 `publish`**：
+
+   ```
+   POST /repos/a776058959/Pumpkin_build/actions/workflows/apk-only.yml/dispatches
+   body: {"ref":"main","inputs":{"publish":true}}
+   ```
+
+4. 等约 1-3 分钟。勾了 `publish` 的话，CI 会**自己**建好 Release 并附上 `pumpkin-shell.apk`
+   （tag = `Custom-<stamp>`，与 APK 内嵌的 versionCode 严格一致 —— 这个不变量不能破）
+5. **真机直装**：直接从 Release 下载，顺便把下载链路也验一遍
+
+   ```powershell
+   curl.exe -L -o "$env:TEMP\a.apk" "https://github.com/a776058959/Pumpkin_build/releases/latest/download/pumpkin-shell.apk"
+   D:\adb-fastboot\adb.exe install -r $env:TEMP\a.apk
+   ```
+
+6. 核对一致性（见上一节）。装完手机上的 versionCode 应该**等于**最新 Release 的。
+
+> **不要手工删/传 Release 资产了。**
+> 以前是那么干的（流程里甚至记着一个写死的 release id），现在由 CI 负责 ——
+> 手工介入会让 tag 与 APK 的版本号错位，那就正好制造出「每次都提示更新、装完还提示」的 bug。
 
 ## 关键约束（改代码前必读，全是踩过的坑）
 

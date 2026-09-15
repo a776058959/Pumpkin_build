@@ -32,7 +32,7 @@
 |---|---|
 | `.github/workflows/build.yml` | 主流水线：定时检查上游（每 2 小时）→ 有新提交才编译各平台 → 打包 APK → 发布 Release → 记录基线 |
 | `.github/workflows/manual-build.yml` | 手动触发一次完整多平台构建（跳过上游检查） |
-| `.github/workflows/apk-only.yml` | 只重打包 App，不动服务端二进制，约 1 分钟出包（**改 UI 用这个**） |
+| `.github/workflows/apk-only.yml` | 只重打包 App，不动服务端二进制，约 1 分钟出包（**改 UI 用这个**）。默认**只出 artifact 不发 Release**，要发必须勾 `publish` |
 | `android-app/` | 南瓜坞 App 源码（Java 业务层 + Compose/miuix 界面）。**不含服务端**，服务端由 App 运行时从 Releases 下载 |
 | `tools/native-linux/` | 在手机本机内核上跑**原生 Alpine Linux**（chroot，不是 Termux 那种用户态终端） |
 | `docs/app-self-update.md` | App 自更新机制曾经完全失效的完整复盘（三个叠加缺陷） |
@@ -75,8 +75,25 @@ App 用仓库内固定的签名密钥（`android-app/app/pumpkin-signing.p12`）
 
 Actions → 选择 workflow → Run workflow。
 
-- `Build Pumpkin (upstream + App)` 支持 `force` 选项，可在上游无新提交时强制构建。
-- 只改了界面就选 `Build Pumpkin shell APK`，一分钟左右出包，不碰服务端编译。
+- **`Build Pumpkin (upstream + App APK)`** —— 完整构建：检查上游 → 编译 8 个平台的服务端 → 打包 App → 发布 Release。
+  支持 `force` 选项，可在上游无新提交时强制构建。**耗时约 1 小时以上。**
+- **`Build Pumpkin App (APK only)`** —— 只重打包 App，一分钟出包，不碰服务端编译。
+
+### ⚠️ 只改 App 时，记得勾 `publish`
+
+`apk-only` **默认只产出 Actions artifact，不创建 Release** —— 因为大多数时候只是拿包来装机器测试。
+
+但这意味着：**不勾 `publish`，改动就永远到不了用户手里。**
+App 的「检查更新」读的是 Releases，artifact 它看不见。曾经因此踩坑：
+连续几轮 UI 改动都只躺在 artifact 里，而本机 adb 装的是新的，
+于是「我这边是好的」—— 用户那边等于没更新（详见提交历史 `docs:` 与 `ci:` 若干条）。
+
+所以要发到用户手里，二选一：
+
+1. 跑 `apk-only` 并勾上 **publish**（快，推荐；只改 App 时服务端没必要重建）；
+2. 或者跑完整流水线（顺便刷新服务端二进制）。
+
+发布出来的 Release 可能**只有 APK**，这是正常的：服务端没变，没必要重建 8 个平台。
 
 ## 开发时要留意
 
