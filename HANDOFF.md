@@ -1,5 +1,11 @@
 # 交接说明（给新的 AI 会话）
 
+> **本项目（除上游服务端外）由 AI 编写。**
+> `android-app/`、`.github/workflows/`、`tools/`、以及全部文档都出自 AI 会话，
+> 人在真机上定方向、验收、报问题。上游 Pumpkin 服务端（Rust）是人类写的，本仓库只拉取编译。
+> 所以：**文档里带数字的结论都配了产生它的方法**（截图、像素比对、`dumpsys`、日志），
+> 不要写「应该没问题」。
+
 ## 这个项目在干什么
 
 把 **Pumpkin**（Rust 写的 Minecraft 服务端，上游 https://github.com/Pumpkin-MC/Pumpkin）编译到安卓，
@@ -25,21 +31,37 @@
 
 ---
 
-## 当前进度快照（2026-09-14 晚）
+## 当前进度快照（2026-09-15）
 
-- App 版本 **0.3.0（versionCode 3）**：已构建、已发布、**已装到测试机并运行正常（无崩溃）**
-- 仓库状态：本地 `main` == GitHub `main` == 提交 **`59ac8f3`**
-  （`feat(shell): liquid-glass panels in the current Java stack`）
-- Release 资产 `pumpkin-shell.apk` = **106890 字节**（0.3.0，含液态玻璃）；
-  固定链接下载字节与构建产物 SHA256 一致（已校验）
-- 归档：
-  - 桌面 `pumpkin-shell.apk` = 0.3.0（106890）
-  - `桌面\pumpkin-apk-旧版本\pumpkin-shell-20260914-1003.apk` = **0.2.0 毛玻璃版**（103170，做像素对比用）
-  - `桌面\pumpkin-apk-旧版本\pumpkin-shell-20260914-0722.apk` = 用户确认过「这次好了」的老版本
-- 验证截图（`D:\androidsdk\shots\`）：
-  - `p_liquid_old_020.png`（0.2.0 运行页）、`p_liquid_new_030.png`（0.3.0 运行页）
-  - `liquid_compare.png`（并排+局部对比拼图，桌面同名文件）
-  - `p_liquid_crop_nav.png`（导航栏局部，识图测试用）
+- App 已从**手写 Java View 整体迁移到 Compose + miuix**（SukiSU / 新版 LSPosed 同款风格）。
+  液态玻璃悬浮底栏的全部动效跑通：按压缩放、拖拽、图标缩放、倾斜高光。
+- **6 套配色**可在设置里切换（`ui/PumpkinTheme.kt` 的 `PumpkinPalettes`）。
+  背景渐变 / 卡片底色 / 按钮 / 底栏选中态都跟着变，选择落盘在 `Prefs` 的 `palette`。
+  真机像素验证：卡片底色三套**精确匹配**，主按钮强调色精确匹配。
+- **沉浸式已修**：状态栏与手势条那一条铺的是 App 自己的渐变，不再是系统色带。
+  根因是给 `android.R.id.content` 加了 `setPadding`，露出窗口底色 `#303030`。
+  现在 insets 由 Compose 算，详见 [ANDROID.md](ANDROID.md) 的「沉浸式界面」。
+- **App 自更新打通**（历史上从未成功过）：三个叠加缺陷 ——
+  `build-android-apk` 的 Gradle/JDK 与工程脱节（还被 `continue-on-error` 掩盖）、
+  只查 `/releases/latest`（那里常常没有 APK）、versionCode 写死。
+  完整复盘见 [docs/app-self-update.md](docs/app-self-update.md)。
+- **原生 Linux 可用**：在手机本机内核上跑真正的 Alpine（chroot），不是 Termux 那种用户态终端。
+  脚本、实测结果与踩过的坑见 [tools/native-linux/](tools/native-linux/)。
+- 术语已统一：源码与文档里不再叫「壳」，一律叫「南瓜坞 / App」。
+- 归档截图（`D:\androidsdk\shots\`）：`immersive.png` vs `immersive_fixed.png`（沉浸式前后）、
+  `theme_night.png` / `theme_sakura.png` / `theme_forest.png`（三套配色）、
+  `dlg_*.png`（miuix 对话框）、`colorcontrol.png`（识图模型的色准对照图）。
+
+### 验证方法（重要，已升级）
+
+**精确数值自己用像素扫描量，定性判断才交给模型。**
+会识图的模型用 `xiaomi-token-plan-cn/mimo-v2.5` ——
+注意**不带 `pro` 的才支持图像输入，`pro` 反而是纯文本**。
+
+实测色准（对照图喂已知色块，见 `colorcontrol.png`）：
+真值 `48,48,48 / 200,30,60 / 30,140,255 / 240,240,240` →
+它读 `50,50,50 / 190,40,55 / 45,140,230 / 230,230,230`。
+**约 ±10/255 的偏差，够判断"这是什么颜色、像不像原生"，不能当像素尺用。**
 
 ---
 
@@ -85,24 +107,23 @@ minSdk 24 安全；CI 编译一次通过。
 
 ---
 
-## 未完成（新会话优先做这些）
+## 未完成 / 已知取舍
 
-1. **倾斜高光动态验证**（需要用户配合，唯一还没验的动态效果）
+1. **倾斜高光仍需人配合验证**（唯一没法自动验的动态效果）
    - 手机**平放**时截一张 → 请用户把手机**向右倾斜约 45° 拿稳** → 再截一张
    - 对比悬浮栏水平方向亮度重心是否右移（位移系数 0.38 × 导航栏宽度）
-   - 命令：
-     ```powershell
-     D:\adb-fastboot\adb.exe shell input keyevent KEYCODE_WAKEUP
-     D:\adb-fastboot\adb.exe shell screencap -p /sdcard/t.png
-     D:\adb-fastboot\adb.exe pull /sdcard/t.png "$env:TEMP\t.png"
-     ```
    - 注意：截屏是**当前帧**，光斑位置会被记录下来，可以对比
-2. **用户对 0.3.0 的观感反馈** → 按反馈调上面的参数（他重视 UI 细节，别自作主张大改）
-3. **真机验证核心链路**：「更新页下载服务端 → 运行页启动」还没验证过。
-   测试机是 **Android 15（API 35）**，正好检验 targetSdk≤28 的 execve 豁免在新系统上是否仍生效；
-   若日志报 `Permission denied`，切设置页的 **Root 模式**。
-4. （待用户拍板）液态玻璃再进一步：真折射需要换 **Jetpack Compose + miuix-kmp**
-   （APK 100KB → 3~5MB、UI 重写约 600 行），用户尚未决定。
+2. **Magisk 还没授权南瓜坞** → App 内切「Root 模式」会提示未获得 root。
+   这**不是代码问题**：`su` 本身可用（`su -c id` → `uid=0 context=u:r:magisk:s0`），
+   但 Magisk 的超级用户列表里没有 `com.pumpkin.server`，需要人在 Magisk 里点一次授权。
+   在此之前普通模式（targetSdk 28 豁免）已验证可用。
+3. **Release 资产名 `pumpkin-shell.apk` 刻意没改名**：它是文档里写明的永久下载链接的一部分，
+   改名会让老链接 404。代码不依赖这个名字（`fetchAppAsset` 按 `.apk` 扩展名匹配）。
+4. **`Prefs.NAME = "pumpkin_shell"` 刻意没改名**：那是 SharedPreferences 的文件名，
+   改了会让升级后的用户丢掉全部设置（镜像源、启动方式都在里面）。
+5. 设置页最后一条加速源要滚动才看得到（纯观感，不影响功能）。
+6. **背景图功能**：已做过可行性分析，**结论是先不做**（不简单）。
+   完整拆解与成本估算见 [docs/background-image.md](docs/background-image.md)。
 
 ---
 
@@ -128,41 +149,55 @@ minSdk 24 安全；CI 编译一次通过。
 
 ## 模型与识图（重要，新会话必读）
 
-三家路由都在用：火山 **Agent Plan**（`ark-agent-plan-cn`）、智谱 BigModel（`zhipu`）、硅基流动（`siliconflow`）。
-Agent Plan 用 `anthropic-messages` 协议、端点 `https://ark.cn-beijing.volces.com/api/plan`（**不是 v3**）。
+### 实测可用性地图（2026-09-15 更新）
 
-### 实测可用性地图（2026-09-14 逐个真实请求验证）
-
-| 模型 | 结果 | 能看图 |
+| 模型 | 能看图 | 备注 |
 |---|---|---|
-| `ark-agent-plan-cn/glm-5.3` | ✅ 200 | ❌ 纯文本（`input: [text]`） |
-| `ark-agent-plan-cn/kimi-k3` | ✅ 200 | ✅ **已用真实截图验证** |
-| `ark-agent-plan-cn/minimax-m3` | ✅ 200 | ✅ 声明支持 |
-| `ark-agent-plan-cn/doubao-seed-evolving` | ✅ 200 | ✅ 声明支持 |
-| `ark-agent-plan-cn/doubao-seed-2.1-turbo` | ✅ 200 | ✅ 声明支持 |
-| `ark-agent-plan-cn/doubao-seed-2.0-lite` / `-mini` | ✅ 200 | ✅ 声明支持 |
-| `ark-agent-plan-cn/deepseek-v4-pro` / `deepseek-v4-flash` | ✅ 200 | ❌ 纯文本 |
-| `ark-agent-plan-cn/doubao-seed-2.1-pro` | ❌ **404 `UnsupportedModel`**（Agent Plan 不含此模型） | — |
-| `zhipu/glm-4.7-flash` / `glm-4.5-flash` | ✅ | ❌ 纯文本 |
-| `zhipu/glm-4v-flash` | ✅ | ✅ **已用真实截图验证**（免费） |
+| `xiaomi-token-plan-cn/mimo-v2.5` | ✅ **实测可用** | ⚠️ **不带 `pro` 的才是多模态**；`mimo-v2.5-pro` 反而是纯文本。反直觉，别记错 |
+| `ark-agent-plan-cn/kimi-k3` | ✅ 已用真实截图验证 | 计划内，1M 上下文 |
+| `ark-agent-plan-cn/minimax-m3`、`doubao-seed-*` | ✅ 声明支持 | |
+| `ark-agent-plan-cn/glm-5.3`、`deepseek-v4-pro/flash` | ❌ 纯文本 | |
+| `zhipu/glm-4v-flash` | ⚠️ 声明支持，但实测一次也没返回（超时） | 且 `zhipu` 在部分会话里未注册，报 `not registered` |
 
-### 用 GLM-5.3 当主模型时怎么识图
+**色准实测**（喂已知色块对照图 `D:\androidsdk\shots\colorcontrol.png`，四条纯色横带）：
 
-**GLM-5.3 是纯文本，主循环的 `read_image` 会直接报 "does not declare image input"**。两条路：
+```
+真值          48,48,48   200,30,60   30,140,255   240,240,240
+mimo-v2.5 读  50,50,50   190,40,55   45,140,230   230,230,230
+```
 
-1. **派视觉子代理**（推荐，主模型保持 GLM-5.3）
-   ```
-   subagent(provider='zhipu', model='glm-4v-flash', ...)            # 免费
-   subagent(provider='ark-agent-plan-cn', model='kimi-k3', ...)     # 计划内，1M 上下文
-   ```
-   子代理提示里直接给图片的绝对路径，让它用 `read_image` 读。
-2. **把主会话模型换成** `kimi-k3` / `minimax-m3` → 主循环自己就能看图（不用子代理）。
+**偏差约 ±10/255** —— 够判断「这是什么颜色、像不像原生控件、有没有错位」，
+**不能当像素尺用**。
+
+> 所以本项目现在的验证分工是：
+> **精确数值自己用像素扫描量**（PowerShell + System.Drawing 逐像素读），
+> **只有定性判断才交给视觉模型**。
+
+### 怎么派视觉子代理
+
+**唯一能给子任务指定模型的通道是 `workflow` 工具的 `agent(prompt, { provider, model })`。**
+`subagent` / `subagent_fork` **不支持**指定 provider/model（它们继承父会话路由），
+所以「换个能识图的便宜模型干活」这件事必须走 `workflow`：
+
+```js
+// workflow 脚本体内
+const r = await agent(
+  "用 read_image 读取 D:\\androidsdk\\shots\\x.png，然后回答：……",
+  { label: "看图", provider: "xiaomi-token-plan-cn", model: "mimo-v2.5" }
+);
+return r;
+```
+
+给子代理**图片的绝对路径**，让它自己用 `read_image` 读。
+
+主会话模型（`deepseek-v4.1-flash` 等）是纯文本，主循环里直接 `read_image` 会报
+`does not declare image input`，必须走上面的派发。
 
 ⚠️ **子代理路由白名单是「会话创建时快照」的**：
 `~/.dsh/settings.yaml` 的 `subagent-model-selection.allowedModels` 改了之后，
 **只有新会话生效**；老会话里用白名单外的模型会报
-`child LLM route "..." is not allowed for this Session`（workflow 的 `agent()` 通道同样受限）。
-所以识图必须**新会话**里做，或直接把主模型换成视觉模型。
+`child LLM route "..." is not allowed for this Session`（`workflow` 的 `agent()` 通道同样受限）。
+所以识图要么在**新会话**里做，要么直接把主模型换成视觉模型。
 
 ### 凭据
 
@@ -236,11 +271,16 @@ Release 保留策略脚本：`.github/scripts/prune-releases.sh`
 
 ## 南瓜坞 App 当前功能
 
-- 三个页面 + 底部悬浮**液态玻璃**导航（实时背景模糊 + 边缘亮线 + 顶部光泽 + 倾斜流动高光）
+- 三个页面 + 底部悬浮**液态玻璃**导航（实时背景模糊 + 边缘亮线 + 顶部光泽 + 倾斜流动高光 + 按压缩放/拖拽动效）
+- **6 套配色**可切换（星夜蓝 / 松林绿 / 落日渐晖 / 樱雾粉 / 深海青 / 石墨灰），
+  背景渐变、卡片底色、按钮、底栏选中态一起变
+- **沉浸式**：状态栏与手势条那一条铺的是 App 自己的背景渐变，不是系统色带
 - **运行页**：状态与运行时长、联机地址（Java/基岩）、启动/停止、电池优化、**选择运行版本**（切换/回滚）、控制台（实时日志 + 命令输入）
 - **更新页**：三块独立卡片 —— 版本信息（检查更新/选择版本）、下载（三态按钮 + 进度条 + 删除下载任务）、本地版本（删除已安装版本）
-- **设置页**：启动方式切换、下载源（API 地址/仓库/镜像前缀）、清理（三种粒度）、检查本应用更新
+- **设置页**：启动方式切换、**配色**、加速源快选、下载源（API 地址/仓库/镜像前缀）、清除数据、关于（版本号 / 检查 App 更新 / 电池优化 / 数据目录）
+- 所有弹窗都是 **miuix 风格**（`WindowDialog`），不用系统原生 `AlertDialog`
 - **双启动模式**：普通模式靠 targetSdk 28 豁免；Root 模式走 `su` 域（**不改 SELinux**，不会被检测软件发现）
+- **App 自更新**：查 Releases 里带 `.apk` 的最新发布，提示下载覆盖安装（版本号由构建时间戳推导）
 - **下载**：多源自动回退（直连 → 上次成功的 → 用户镜像 → ghfast.top → gh-proxy.com → ghproxy.net），
   支持断点续传；安装前校验 ELF（aarch64）；失败自动重试
 
@@ -250,5 +290,8 @@ Release 保留策略脚本：`.github/scripts/prune-releases.sh`
 - 他多次因 UI 细节不满意（按钮跳动、圆角缺口、指示器尺寸）。
   **改 UI 前先想清楚状态归属和控件职责，别打补丁叠补丁。**
 - **不要声称「应该没问题」**，让他截图确认。
-- 已确认可用的历史版本：`桌面\pumpkin-apk-旧版本\` 里的 `pumpkin-shell-20260914-0722.apk`（他确认过 "这次好了"）。
+- **重要步骤（改文件之类）他要自己来还是交给 AI？** 他明确说过：*「修改文件之类的重要步骤还是你自己来吧」* ——
+  即实现由本会话亲自做，不要甩给子代理。子代理只用于自包含的只读任务（识图、调研）。
 - 他会自己动手改配置/勾选模型；改完记得**新会话才生效**这件事（见「模型与识图」）。
+- **他说「你只负责统筹和规划」时曾要求全交给某个路由**，但随后又纠正为「重要步骤自己做」。
+  以最新指令为准：**实现自己做，只把自包含的小任务外派**。
