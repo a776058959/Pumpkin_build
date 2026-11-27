@@ -233,6 +233,58 @@ jobs:
             --title "Custom Build $STAMP" \
             --notes-file notes.md
 
+      # 固定下载入口：把最新 APK 再覆盖到 tag=app 的 Release 里。
+      #
+      # 为什么需要它：服务端发布（build.yml）比 App 频繁得多，`releases/latest`
+      # 经常指向一个**只带服务端二进制**的发布，于是
+      #   .../releases/latest/download/pumpkin-shell.apk
+      # 会 404 —— 想下 APK 只能在一堆 Custom-* 里逐个翻。
+      #
+      # 这里用一个固定 tag（app）永远放最新 APK，链接就稳定了：
+      #   .../releases/download/app/pumpkin-shell.apk
+      # 与插件商店（tag=plugins）是同一个做法。
+      #
+      # 发成 prerelease：不抢「Latest release」的位置，也就不影响
+      # App 自更新与服务端版本列表的既有判断。
+      - name: Update the rolling "app" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAMP: ${{ needs.apk.outputs.stamp }}
+        shell: bash
+        run: |
+          cat > app-notes.md <<EOF
+          ## 南瓜坞 App（最新版）
+
+          下载：**pumpkin-shell.apk**（就是下面的附件）
+
+          这个 Release 固定用 tag \`app\`，每次 App 构建都会覆盖里面的 APK，
+          所以它的下载链接**永远指向最新版**：
+
+          \`\`\`
+          https://github.com/$GITHUB_REPOSITORY/releases/download/app/pumpkin-shell.apk
+          \`\`\`
+
+          当前版本：\`$STAMP\`（versionCode \`$(echo "$STAMP" | tr -d '-')\`）
+
+          > 服务端二进制不在这里 —— 它有自己的发布（带 \`pumpkin-android-arm64-*\` 等附件的那些）。
+          > App 内「检查更新」也会自动找到最新版。
+          EOF
+
+          if gh release view app --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload app rel/pumpkin-shell.apk \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit app \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "南瓜坞 App $STAMP" \
+              --notes-file app-notes.md
+          else
+            gh release create app rel/pumpkin-shell.apk \
+              --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --title "南瓜坞 App $STAMP" \
+              --notes-file app-notes.md
+          fi
+
   # 插件商店：把插件 dex 与索引发到一个**固定 tag** 的 Release（tag = plugins）。
   #
   # 为什么不跟 App 一起发：插件和 App 是两个独立的更新节奏 ——

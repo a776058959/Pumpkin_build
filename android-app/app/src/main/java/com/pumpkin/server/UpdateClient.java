@@ -38,6 +38,18 @@ public final class UpdateClient {
     public static final String DEFAULT_REPO = "a776058959/Pumpkin_build";
 
     /**
+     * 「最新 APK」固定入口所在的 Release tag。
+     *
+     * 每次 App 构建都会覆盖这个 Release 里的 pumpkin-shell.apk，
+     * 所以它的下载链接永远指向最新版：
+     * {@code .../releases/download/app/pumpkin-shell.apk}
+     *
+     * 和插件商店（tag=plugins）是同一个做法。**它不参与自更新的版本比较** ——
+     * 那个 tag 里没有版本号，混进去会让自更新静默失效（见 fetchAppAsset 的注释）。
+     */
+    public static final String RELEASE_TAG_APP = "app";
+
+    /**
      * 内置的 GitHub 加速前缀，空串表示直连。按顺序尝试。
      *
      * 定义在 {@link MirrorOption} 里，与设置页的「加速源」选项共用同一份清单，
@@ -307,6 +319,18 @@ public final class UpdateClient {
         for (int i = 0; i < rels.length(); i++) {
             JSONObject rel = rels.optJSONObject(i);
             if (rel == null || rel.optBoolean("draft", false)) {
+                continue;
+            }
+            // 跳过 tag=app 的「滚动镜像」。
+            //
+            // 那个 Release 是给人**手动下载**用的固定入口（每次覆盖同一份 APK，
+            // 见 apk-only.yml 的 "Update the rolling app release"），它的 tag 里
+            // 没有版本号，parseVersionCodeFromTag 会得到 0。
+            // 让它参与这里的比较会有两种坏结果：要么被当成「解析不出版本号」而被
+            // Custom-* 顶掉（白扫一遍），要么在 Custom-* 都不在最近 20 个里时被选中，
+            // 于是 versionCode=0 永远不比当前版本大 —— **自更新静默失效**。
+            // 所以自更新只认 Custom-<时间戳>，滚动镜像专供手动下载。
+            if (RELEASE_TAG_APP.equals(rel.optString("tag_name", ""))) {
                 continue;
             }
             JSONArray assets = rel.optJSONArray("assets");

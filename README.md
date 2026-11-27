@@ -4,9 +4,9 @@
 
 ## 安装
 
-去 [Releases](https://github.com/a776058959/Pumpkin_build/releases) 页，找最新一个带 `pumpkin-shell.apk` 附件的发布，下载安装。系统可能要求先允许「安装未知应用」。App 自身支持应用内更新，装好后不用再手动下 APK。
+下载 **[pumpkin-shell.apk](https://github.com/a776058959/Pumpkin_build/releases/download/app/pumpkin-shell.apk)** 安装。系统可能要求先允许「安装未知应用」。装好后 App 支持应用内更新，不用再手动下载。
 
-> 别用 `releases/latest/download/pumpkin-shell.apk` 这种固定链接：服务端发布更频繁，latest 常是不带 APK 的服务端发布，会 404。
+这个链接是**固定的**，永远指向最新版 —— 每次构建都会覆盖同一个 Release（tag 为 `app`），所以不用去 Releases 页逐个找。
 
 ## 使用
 
