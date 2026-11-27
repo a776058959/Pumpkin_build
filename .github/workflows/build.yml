@@ -243,6 +243,7 @@ jobs:
         with:
           name: pumpkin-server-${{ matrix.suffix }}-${{ steps.datetime.outputs.utc_date }}
           path: src/target/${{ matrix.target }}/release/pumpkin${{ runner.os == 'Windows' && '.exe' || '' }}
+          retention-days: 3
 
   # Android ARM64 构建（aarch64-linux-android，Termux 可运行），实验性允许失败。
   build-android:
@@ -336,6 +337,7 @@ jobs:
         with:
           name: pumpkin-server-android-arm64-${{ steps.datetime.outputs.utc_date }}
           path: src/target/aarch64-linux-android/release/pumpkin
+          retention-days: 3
 
   # ──────────────────────────────────────────────────────────────────────────
   # App（南瓜坞 APK）**不再**在这条流水线里构建。

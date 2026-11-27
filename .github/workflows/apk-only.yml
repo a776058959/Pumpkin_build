@@ -164,16 +164,19 @@ jobs:
         with:
           name: pumpkin-plugins-${{ steps.stamp.outputs.utc }}
           path: android-app/plugin-out/*.dex
+          retention-days: 3
       - name: Upload plugin store index
         uses: actions/upload-artifact@v4
         with:
           name: pumpkin-plugins-index-${{ steps.stamp.outputs.utc }}
           path: android-app/plugin-out/plugins.json
+          retention-days: 3
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: pumpkin-app-apk-${{ steps.stamp.outputs.utc }}
           path: apk-out/*.apk
+          retention-days: 3
 
   # 发布：只有勾了 publish 才跑。
   #
